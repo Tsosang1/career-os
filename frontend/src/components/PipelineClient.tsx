@@ -12,6 +12,15 @@ import {
 import { UnverifiedEvent } from '@/app/(workspace)/pipeline/page';
 import JobDrawer from './JobDrawer';
 
+export interface JobLead {
+  id: string;
+  company_name: string;
+  role_title: string;
+  location_mode?: string;
+  source: string;
+  subject: string;
+}
+
 
 const COLUMNS: { key: ApplicationStatus; label: string }[] = [
   { key: 'RADAR', label: 'Radar' },
@@ -51,6 +60,7 @@ export default function PipelineClient({
   const [addOpen, setAddOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [leads, setLeads] = useState<JobLead[]>([]);
 
   // Add Job modal state
   const [companyName, setCompanyName] = useState('');
@@ -171,7 +181,7 @@ export default function PipelineClient({
       const res = await fetch(`${apiUrl}/emails/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, max_results: 30 }),
+        body: JSON.stringify({ user_id: user.id, max_results: 40 }),
       });
 
       const data = await res.json();
@@ -180,6 +190,7 @@ export default function PipelineClient({
         return;
       }
 
+      setLeads(data.leads ?? []);
       alert(
         `Gmail Sync Complete: Scanned ${data.scanned} new emails, matched ${data.matched} updates, staged ${data.staged_for_review} for review.`
       );
@@ -188,6 +199,37 @@ export default function PipelineClient({
       alert('Could not reach FastAPI backend on port 8000. Make sure uvicorn is running.');
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function promoteLeadToRadar(lead: {
+    id: string;
+    company_name: string;
+    role_title: string;
+    location_mode?: string;
+    source: string;
+  }) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from('applications')
+      .insert({
+        user_id: user.id,
+        company_name: lead.company_name,
+        role_title: lead.role_title,
+        status: 'RADAR',
+        location_mode: lead.location_mode || 'South Africa',
+        source: lead.source,
+      })
+      .select()
+      .single();
+
+    if (!error && data) {
+      setApps((prev) => [data as Application, ...prev]);
+      setLeads((prev) => prev.filter((l) => l.id !== lead.id));
     }
   }
 
@@ -344,6 +386,64 @@ export default function PipelineClient({
           );
         })}
       </div>
+
+      {/* Incoming Job Alert Leads Tray */}
+      {leads.length > 0 && (
+        <div className="mt-6 bg-[#0E131F] border border-slate-800/80 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+                Incoming Job Alert Leads ({leads.length})
+              </h2>
+              <p className="text-[11px] text-slate-500">
+                Curated matches from your email alerts — click + Radar to track or × to dismiss.
+              </p>
+            </div>
+            <button
+              onClick={() => setLeads([])}
+              className="text-xs text-slate-500 hover:text-slate-300"
+            >
+              Clear All
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {leads.map((lead) => (
+              <div
+                key={lead.id}
+                className="bg-[#111827] border border-slate-800 rounded-xl p-3 flex flex-col justify-between gap-2.5"
+              >
+                <div>
+                  <p className="text-[11px] font-medium text-cyan-400 truncate">
+                    {lead.company_name}
+                  </p>
+                  <p className="text-xs font-semibold text-slate-100 line-clamp-2 mt-0.5">
+                    {lead.role_title}
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-1">{lead.source}</p>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-slate-800/70">
+                  <button
+                    onClick={() =>
+                      setLeads((prev) => prev.filter((l) => l.id !== lead.id))
+                    }
+                    className="text-[11px] text-slate-500 hover:text-rose-400"
+                  >
+                    Dismiss
+                  </button>
+                  <button
+                    onClick={() => promoteLeadToRadar(lead)}
+                    className="px-2.5 py-1 rounded-md bg-cyan-500/15 hover:bg-cyan-500 text-cyan-400 hover:text-slate-950 font-medium text-[11px] transition"
+                  >
+                    + Radar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Global Slide-Over Job Drawer */}
       <JobDrawer
