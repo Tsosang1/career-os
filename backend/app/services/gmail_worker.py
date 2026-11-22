@@ -12,11 +12,12 @@ from app.services.entity_resolver import resolve_application_id
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 ATS_QUERY = (
-    'newer_than:30d ('
-    '"thank you for applying" OR "application received" OR "application update" '
-    'OR "interview" OR "assessment" OR "unfortunately" OR "regret to inform" '
-    'OR from:(workday OR successfactors OR oraclecloud OR pnet OR greenhouse OR lever)'
-    ')'
+    'newer_than:60d ('
+    '"thank you for applying" OR "application received" OR "your application to" '
+    'OR "your application for" OR "interview invitation" OR "online assessment" '
+    'OR "unfortunately" OR "regret to inform" '
+    'OR from:(workday OR successfactors OR oraclecloud OR greenhouse OR lever OR smartrecruiters OR sova)'
+    ') -subject:("job alert" OR "jobs matching" OR "recommended jobs")'
 )
 
 supabase = create_client(settings.supabase_url, settings.supabase_service_role_key)

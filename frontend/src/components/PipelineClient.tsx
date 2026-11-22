@@ -171,7 +171,7 @@ export default function PipelineClient({
       const res = await fetch(`${apiUrl}/emails/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, max_results: 25 }),
+        body: JSON.stringify({ user_id: user.id, max_results: 30 }),
       });
 
       const data = await res.json();
