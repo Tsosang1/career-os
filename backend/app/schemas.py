@@ -21,7 +21,7 @@ class JobLead(BaseModel):
     role_title: str
     location_mode: Optional[str] = None
     source: str = "Email Alert"
-    subject: str
+    subject: Optional[str] = None
     portal_url: Optional[str] = None
     received_at: Optional[str] = None
 

@@ -1,6 +1,6 @@
 import { connection } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import PipelineClient from '@/components/PipelineClient';
+import PipelineClient, { JobLead } from '@/components/PipelineClient';
 import { Application, VaultDocument } from '@/types/database';
 
 export interface UnverifiedEvent {
@@ -22,6 +22,7 @@ export default async function PipelinePage() {
     { data: documents },
     { data: links },
     { data: unverifiedEvents },
+    { data: leads },
   ] = await Promise.all([
     supabase
       .from('applications')
@@ -38,6 +39,11 @@ export default async function PipelinePage() {
       .select('id, application_id, detected_status, raw_subject, raw_snippet, confidence_score, occurred_at')
       .eq('is_verified', false)
       .order('occurred_at', { ascending: false }),
+    supabase
+      .from('job_leads')
+      .select('id, company_name, role_title, location_mode, source, portal_url, received_at')
+      .eq('status', 'NEW')
+      .order('received_at', { ascending: false }),
   ]);
 
   return (
@@ -46,6 +52,7 @@ export default async function PipelinePage() {
       vaultDocs={(documents as VaultDocument[]) ?? []}
       initialLinks={links ?? []}
       unverifiedEvents={(unverifiedEvents as UnverifiedEvent[]) ?? []}
+      initialLeads={(leads as JobLead[]) ?? []}
     />
   );
 }

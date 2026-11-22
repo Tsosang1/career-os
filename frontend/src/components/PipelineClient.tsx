@@ -45,11 +45,13 @@ export default function PipelineClient({
   vaultDocs,
   initialLinks,
   unverifiedEvents,
+  initialLeads = [],
 }: {
   initialApps: Application[];
   vaultDocs: VaultDocument[];
   initialLinks: { application_id: string; document_id: string }[];
   unverifiedEvents: UnverifiedEvent[];
+  initialLeads?: JobLead[];
 }) {
   const supabase = createClient();
   const router = useRouter();
@@ -62,7 +64,7 @@ export default function PipelineClient({
   const [addOpen, setAddOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [leads, setLeads] = useState<JobLead[]>([]);
+  const [leads, setLeads] = useState<JobLead[]>(initialLeads);
 
   // Add Job modal state
   const [companyName, setCompanyName] = useState('');
@@ -204,6 +206,25 @@ export default function PipelineClient({
     }
   }
 
+  async function handleDismissLead(leadId: string) {
+    setLeads((prev) => prev.filter((l) => l.id !== leadId));
+    await supabase
+      .from('job_leads')
+      .update({ status: 'DISMISSED' })
+      .eq('id', leadId);
+  }
+
+  async function handleClearAllLeads() {
+    const ids = leads.map((l) => l.id);
+    setLeads([]);
+    if (ids.length > 0) {
+      await supabase
+        .from('job_leads')
+        .update({ status: 'DISMISSED' })
+        .in('id', ids);
+    }
+  }
+
   async function promoteLeadToRadar(lead: JobLead) {
     const {
       data: { user },
@@ -227,26 +248,51 @@ export default function PipelineClient({
     if (!error && data) {
       setApps((prev) => [data as Application, ...prev]);
       setLeads((prev) => prev.filter((l) => l.id !== lead.id));
+      await supabase
+        .from('job_leads')
+        .update({ status: 'PROMOTED' })
+        .eq('id', lead.id);
     }
   }
 
   async function demoteAppToLeads(app: Application) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
     await supabase.from('applications').delete().eq('id', app.id);
     setApps((prev) => prev.filter((a) => a.id !== app.id));
-    setLeads((prev) => [
+
+    const newLead: JobLead = {
+      id: app.id,
+      company_name: app.company_name,
+      role_title: app.role_title,
+      location_mode: app.location_mode || 'South Africa',
+      source: app.source || 'Pipeline',
+      subject: `${app.role_title} at ${app.company_name}`,
+      portal_url: app.portal_url || undefined,
+      received_at: app.created_at,
+    };
+
+    setLeads((prev) => [newLead, ...prev]);
+    setSelectedAppId(null);
+
+    await supabase.from('job_leads').upsert(
       {
         id: app.id,
+        user_id: user.id,
+        gmail_message_id: `demoted-${app.id}`,
         company_name: app.company_name,
         role_title: app.role_title,
         location_mode: app.location_mode || 'South Africa',
         source: app.source || 'Pipeline',
-        subject: `${app.role_title} at ${app.company_name}`,
-        portal_url: app.portal_url || undefined,
+        portal_url: app.portal_url || null,
         received_at: app.created_at,
+        status: 'NEW',
       },
-      ...prev,
-    ]);
-    setSelectedAppId(null);
+      { onConflict: 'id' }
+    );
   }
 
   async function handleVerifyEvent(ev: UnverifiedEvent, approve: boolean) {
@@ -424,7 +470,7 @@ export default function PipelineClient({
               </p>
             </div>
             <button
-              onClick={() => setLeads([])}
+              onClick={handleClearAllLeads}
               className="text-xs text-slate-500 hover:text-slate-300"
             >
               Clear All
@@ -468,9 +514,7 @@ export default function PipelineClient({
 
                 <div className="flex items-center justify-between pt-2 border-t border-slate-800/70">
                   <button
-                    onClick={() =>
-                      setLeads((prev) => prev.filter((l) => l.id !== lead.id))
-                    }
+                    onClick={() => handleDismissLead(lead.id)}
                     className="text-[11px] text-slate-500 hover:text-rose-400"
                   >
                     Dismiss

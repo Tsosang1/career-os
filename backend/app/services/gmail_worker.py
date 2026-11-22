@@ -74,16 +74,13 @@ def _extract_job_url(payload: dict, msg_id: str) -> str:
 
     return f"https://mail.google.com/mail/u/0/#all/{msg_id}"
 
-def _extract_leads(service, max_leads: int = 12) -> list[dict]:
+def _sync_and_fetch_leads(service, user_id: str, max_leads: int = 15) -> list[dict]:
     msg_list = (
         service.users()
         .messages()
         .list(userId="me", q=JOB_LEADS_QUERY, maxResults=max_leads)
         .execute()
     ).get("messages", [])
-
-    leads = []
-    seen_titles = set()
 
     for item in msg_list:
         msg = (
@@ -119,25 +116,30 @@ def _extract_leads(service, max_leads: int = 12) -> list[dict]:
         else:
             continue
 
-        dedup_key = f"{company_name.lower()}::{role_title.lower()}"
-        if dedup_key in seen_titles:
-            continue
-        seen_titles.add(dedup_key)
-
-        leads.append(
+        supabase.table("job_leads").upsert(
             {
-                "id": item["id"],
+                "user_id": user_id,
+                "gmail_message_id": item["id"],
                 "company_name": company_name[:80],
                 "role_title": role_title[:100],
                 "location_mode": "South Africa",
                 "source": "LinkedIn Alert" if "linkedin" in sender.lower() else "Email Alert",
-                "subject": subject,
                 "portal_url": _extract_job_url(payload, item["id"]),
-                "received_at": received_iso,
-            }
-        )
+                "received_at": received_iso or datetime.now(timezone.utc).isoformat(),
+            },
+            on_conflict="user_id,gmail_message_id",
+            ignore_duplicates=True,
+        ).execute()
 
-    return leads
+    res = (
+        supabase.table("job_leads")
+        .select("id, company_name, role_title, location_mode, source, portal_url, received_at")
+        .eq("user_id", user_id)
+        .eq("status", "NEW")
+        .order("received_at", ascending=False)
+        .execute()
+    )
+    return res.data or []
 
 def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
     service = get_gmail_service()
@@ -257,7 +259,7 @@ def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
             else:
                 staged += 1
 
-    leads = _extract_leads(service)
+    leads = _sync_and_fetch_leads(service, user_id)
 
     return {
         "scanned": len(unseen_emails),
