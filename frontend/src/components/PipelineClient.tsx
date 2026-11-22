@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Search, AlertCircle, X, CheckCircle2 } from 'lucide-react';
+import { Plus, Search, AlertCircle, X, CheckCircle2, RefreshCw } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import {
   Application,
@@ -11,6 +11,7 @@ import {
 } from '@/types/database';
 import { UnverifiedEvent } from '@/app/(workspace)/pipeline/page';
 import JobDrawer from './JobDrawer';
+
 
 const COLUMNS: { key: ApplicationStatus; label: string }[] = [
   { key: 'RADAR', label: 'Radar' },
@@ -49,6 +50,7 @@ export default function PipelineClient({
   const [draggedAppId, setDraggedAppId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   // Add Job modal state
   const [companyName, setCompanyName] = useState('');
@@ -157,6 +159,38 @@ export default function PipelineClient({
     }
   }
 
+  async function handleGmailSync() {
+    setSyncing(true);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+      const res = await fetch(`${apiUrl}/emails/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id, max_results: 25 }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.detail || 'Gmail sync failed.');
+        return;
+      }
+
+      alert(
+        `Gmail Sync Complete: Scanned ${data.scanned} new emails, matched ${data.matched} updates, staged ${data.staged_for_review} for review.`
+      );
+      router.refresh();
+    } catch {
+      alert('Could not reach FastAPI backend on port 8000. Make sure uvicorn is running.');
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   async function handleVerifyEvent(ev: UnverifiedEvent, approve: boolean) {
     if (approve && ev.application_id && ev.detected_status) {
       await supabase
@@ -214,6 +248,15 @@ export default function PipelineClient({
               className="w-full pl-9 pr-3 py-2 rounded-lg bg-[#111827] border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
             />
           </div>
+
+          <button
+            onClick={handleGmailSync}
+            disabled={syncing}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#111827] hover:bg-slate-800 border border-slate-700 text-slate-200 font-medium text-xs transition disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin text-cyan-400' : ''}`} />
+            {syncing ? 'Syncing...' : 'Sync Gmail'}
+          </button>
 
           <button
             onClick={() => setAddOpen(true)}
