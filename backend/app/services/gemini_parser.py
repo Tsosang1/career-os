@@ -23,7 +23,7 @@ Analyze the email sender, subject, and body snippet.
 4. Set confidence_score < 0.85 if the company name or stage is ambiguous.
 """
 
-def classify_ats_email(sender: str, subject: str, snippet: str) -> ParsedAtsEmail:
+def _classify_single(sender: str, subject: str, snippet: str) -> ParsedAtsEmail:
     prompt = f"Sender: {sender}\nSubject: {subject}\nBody Snippet: {snippet}"
     print(f"[Gemini] Classifying: {subject[:60]}...", flush=True)
 
@@ -55,3 +55,20 @@ def classify_ats_email(sender: str, subject: str, snippet: str) -> ParsedAtsEmai
 
     print("  -> All models temporarily busy, skipping message for next sync.", flush=True)
     return ParsedAtsEmail(is_job_related=False)
+
+def classify_email_batch(emails: list[dict]) -> dict[int, ParsedAtsEmail]:
+    results: dict[int, ParsedAtsEmail] = {}
+    for item in emails:
+        idx = int(item.get("index", 0))
+        results[idx] = _classify_single(
+            sender=item.get("sender", ""),
+            subject=item.get("subject", ""),
+            snippet=item.get("snippet", ""),
+        )
+    return results
+
+def classify_ats_email(sender: str, subject: str, snippet: str) -> ParsedAtsEmail:
+    batch = classify_email_batch([
+        {"index": 0, "sender": sender, "subject": subject, "snippet": snippet}
+    ])
+    return batch.get(0, ParsedAtsEmail(is_job_related=False))
