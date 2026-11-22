@@ -40,7 +40,7 @@ def classify_ats_email(sender: str, subject: str, snippet: str) -> ParsedAtsEmai
                         temperature=0.1,
                     ),
                 )
-                if response.parsed:
+                if isinstance(response.parsed, ParsedAtsEmail):
                     print(f"  -> {model_name}: job={response.parsed.is_job_related} | {response.parsed.company_name} ({response.parsed.detected_status})", flush=True)
                     return response.parsed
                 return ParsedAtsEmail(is_job_related=False)
