@@ -7,7 +7,7 @@ from app.schemas import ParsedAtsEmail
 
 client = genai.Client(api_key=settings.gemini_api_key)
 
-MODELS = ["gemini-3.8-flash", "gemini-3.8-flash-lite"]
+MODELS = ["gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-2.5-flash-lite"]
 
 SYSTEM_PROMPT = """
 You are an ATS (Applicant Tracking System) email parser for a South African software engineering graduate job seeker.
@@ -25,9 +25,10 @@ Analyze the email sender, subject, and body snippet.
 
 def classify_ats_email(sender: str, subject: str, snippet: str) -> ParsedAtsEmail:
     prompt = f"Sender: {sender}\nSubject: {subject}\nBody Snippet: {snippet}"
+    print(f"[Gemini] Classifying: {subject[:60]}...", flush=True)
 
     for model_name in MODELS:
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 response = client.models.generate_content(
                     model=model_name,
@@ -40,15 +41,17 @@ def classify_ats_email(sender: str, subject: str, snippet: str) -> ParsedAtsEmai
                     ),
                 )
                 if response.parsed:
+                    print(f"  -> {model_name}: job={response.parsed.is_job_related} | {response.parsed.company_name} ({response.parsed.detected_status})", flush=True)
                     return response.parsed
                 return ParsedAtsEmail(is_job_related=False)
             except APIError as exc:
                 if exc.code in (429, 503):
-                    time.sleep(1.5 * (attempt + 1))
+                    print(f"  -> {model_name} busy ({exc.code}), retrying fast...", flush=True)
+                    time.sleep(0.8 * (attempt + 1))
                     continue
                 if exc.code == 404:
-                    break  # Try next fallback model immediately
+                    break
                 raise
 
-    # If both models are temporarily overloaded, skip safely so already-synced emails still save
+    print("  -> All models temporarily busy, skipping message for next sync.", flush=True)
     return ParsedAtsEmail(is_job_related=False)
