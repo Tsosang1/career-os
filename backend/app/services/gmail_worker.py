@@ -1,5 +1,7 @@
 import os
 import re
+import base64
+from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -53,8 +55,26 @@ def get_gmail_service():
             token.write(creds.to_json())
     return build("gmail", "v1", credentials=creds)
 
+def _extract_job_url(payload: dict, msg_id: str) -> str:
+    """Finds the direct job listing URL inside the email body, or falls back to the Gmail message."""
+    raw_html = ""
+    parts = payload.get("parts") or [payload]
+    for part in parts:
+        data = part.get("body", {}).get("data")
+        if data:
+            try:
+                raw_html += base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
+            except Exception:
+                pass
+
+    # Look for LinkedIn job view links or external career links
+    linkedin_match = re.search(r"https://www\.linkedin\.com/comm/jobs/view/\d+[^\s\"'<>]*", raw_html)
+    if linkedin_match:
+        return linkedin_match.group(0).replace("&amp;", "&")
+
+    return f"https://mail.google.com/mail/u/0/#all/{msg_id}"
+
 def _extract_leads(service, max_leads: int = 12) -> list[dict]:
-    """Extracts clean role + company pairs from curated LinkedIn / company alert subjects."""
     msg_list = (
         service.users()
         .messages()
@@ -69,15 +89,27 @@ def _extract_leads(service, max_leads: int = 12) -> list[dict]:
         msg = (
             service.users()
             .messages()
-            .get(userId="me", id=item["id"], format="metadata", metadataHeaders=["From", "Subject"])
+            .get(userId="me", id=item["id"], format="full")
             .execute()
         )
-        headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
+        payload = msg.get("payload", {})
+        headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
         subject = headers.get("Subject", "").strip()
         sender = headers.get("From", "")
+        raw_date = headers.get("Date", "")
 
-        # Parse patterns like: "Internship: Network Engineer at Council for Scientific and Industrial Research (CSIR)"
-        at_match = re.match(r"^(?:You may be a fit for\s+)?(.+?)\s+(?:at|@)\s+(.+?)(?:\s+in\s+South Africa.*)?$", subject, re.IGNORECASE)
+        received_iso = None
+        if raw_date:
+            try:
+                received_iso = parsedate_to_datetime(raw_date).isoformat()
+            except Exception:
+                received_iso = None
+
+        at_match = re.match(
+            r"^(?:You may be a fit for\s+)?(.+?)\s+(?:at|@)\s+(.+?)(?:\s+in\s+South Africa.*)?$",
+            subject,
+            re.IGNORECASE,
+        )
         if at_match:
             role_title = at_match.group(1).strip(" '\"")
             company_name = at_match.group(2).split(" - ")[0].strip(" '\"")
@@ -100,6 +132,8 @@ def _extract_leads(service, max_leads: int = 12) -> list[dict]:
                 "location_mode": "South Africa",
                 "source": "LinkedIn Alert" if "linkedin" in sender.lower() else "Email Alert",
                 "subject": subject,
+                "portal_url": _extract_job_url(payload, item["id"]),
+                "received_at": received_iso,
             }
         )
 

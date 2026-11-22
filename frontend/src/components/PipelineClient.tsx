@@ -19,6 +19,8 @@ export interface JobLead {
   location_mode?: string;
   source: string;
   subject: string;
+  portal_url?: string;
+  received_at?: string;
 }
 
 
@@ -202,13 +204,7 @@ export default function PipelineClient({
     }
   }
 
-  async function promoteLeadToRadar(lead: {
-    id: string;
-    company_name: string;
-    role_title: string;
-    location_mode?: string;
-    source: string;
-  }) {
+  async function promoteLeadToRadar(lead: JobLead) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -223,6 +219,7 @@ export default function PipelineClient({
         status: 'RADAR',
         location_mode: lead.location_mode || 'South Africa',
         source: lead.source,
+        portal_url: lead.portal_url || null,
       })
       .select()
       .single();
@@ -231,6 +228,25 @@ export default function PipelineClient({
       setApps((prev) => [data as Application, ...prev]);
       setLeads((prev) => prev.filter((l) => l.id !== lead.id));
     }
+  }
+
+  async function demoteAppToLeads(app: Application) {
+    await supabase.from('applications').delete().eq('id', app.id);
+    setApps((prev) => prev.filter((a) => a.id !== app.id));
+    setLeads((prev) => [
+      {
+        id: app.id,
+        company_name: app.company_name,
+        role_title: app.role_title,
+        location_mode: app.location_mode || 'South Africa',
+        source: app.source || 'Pipeline',
+        subject: `${app.role_title} at ${app.company_name}`,
+        portal_url: app.portal_url || undefined,
+        received_at: app.created_at,
+      },
+      ...prev,
+    ]);
+    setSelectedAppId(null);
   }
 
   async function handleVerifyEvent(ev: UnverifiedEvent, approve: boolean) {
@@ -389,14 +405,22 @@ export default function PipelineClient({
 
       {/* Incoming Job Alert Leads Tray */}
       {leads.length > 0 && (
-        <div className="mt-6 bg-[#0E131F] border border-slate-800/80 rounded-xl p-4">
+        <div
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={() => {
+            const moved = apps.find((a) => a.id === draggedAppId);
+            if (moved) demoteAppToLeads(moved);
+            setDraggedAppId(null);
+          }}
+          className="mt-6 bg-[#0E131F] border border-slate-800/80 rounded-xl p-4 transition-colors hover:border-amber-500/30"
+        >
           <div className="flex items-center justify-between mb-3">
             <div>
               <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-300">
                 Incoming Job Alert Leads ({leads.length})
               </h2>
               <p className="text-[11px] text-slate-500">
-                Curated matches from your email alerts — click + Radar to track or × to dismiss.
+                Curated matches from your email alerts — click + Radar to track, drop a card here to demote, or × to dismiss.
               </p>
             </div>
             <button
@@ -414,12 +438,31 @@ export default function PipelineClient({
                 className="bg-[#111827] border border-slate-800 rounded-xl p-3 flex flex-col justify-between gap-2.5"
               >
                 <div>
-                  <p className="text-[11px] font-medium text-cyan-400 truncate">
-                    {lead.company_name}
-                  </p>
-                  <p className="text-xs font-semibold text-slate-100 line-clamp-2 mt-0.5">
-                    {lead.role_title}
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-medium text-cyan-400 truncate">
+                      {lead.company_name}
+                    </p>
+                    {lead.received_at && (
+                      <span className="text-[10px] text-slate-500 shrink-0">
+                        {timeAgo(lead.received_at)}
+                      </span>
+                    )}
+                  </div>
+                  {lead.portal_url ? (
+                    <a
+                      href={lead.portal_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-semibold text-slate-100 hover:text-cyan-300 line-clamp-2 mt-0.5 inline-flex items-center gap-1 group"
+                    >
+                      <span className="group-hover:underline">{lead.role_title}</span>
+                      <span className="text-[10px] text-slate-400 group-hover:text-cyan-300">↗</span>
+                    </a>
+                  ) : (
+                    <p className="text-xs font-semibold text-slate-100 line-clamp-2 mt-0.5">
+                      {lead.role_title}
+                    </p>
+                  )}
                   <p className="text-[10px] text-slate-500 mt-1">{lead.source}</p>
                 </div>
 
@@ -451,6 +494,7 @@ export default function PipelineClient({
         vaultDocs={vaultDocs}
         attachedDocIds={attachedDocIds}
         onClose={() => setSelectedAppId(null)}
+        onDemoteToLeads={demoteAppToLeads}
         onUpdated={(updated) => {
           if (updated.status === 'CLOSED') {
             setApps((prev) => prev.filter((a) => a.id !== updated.id));

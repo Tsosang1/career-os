@@ -22,6 +22,8 @@ class JobLead(BaseModel):
     location_mode: Optional[str] = None
     source: str = "Email Alert"
     subject: str
+    portal_url: Optional[str] = None
+    received_at: Optional[str] = None
 
 class SyncRequest(BaseModel):
     user_id: str

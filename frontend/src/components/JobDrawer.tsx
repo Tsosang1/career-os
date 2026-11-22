@@ -44,6 +44,7 @@ export default function JobDrawer({
   onClose,
   onUpdated,
   onLinksChanged,
+  onDemoteToLeads,
 }: {
   app: Application | null;
   vaultDocs: VaultDocument[];
@@ -51,6 +52,7 @@ export default function JobDrawer({
   onClose: () => void;
   onUpdated: (updated: Application) => void;
   onLinksChanged: (appId: string, nextDocIds: string[]) => void;
+  onDemoteToLeads?: (app: Application) => void;
 }) {
   const supabase = createClient();
   const router = useRouter();
@@ -457,12 +459,22 @@ export default function JobDrawer({
 
         {/* Drawer Footer */}
         <div className="px-6 py-4 border-t border-slate-800 bg-[#0B0F17] flex items-center justify-between">
-          <button
-            onClick={handleArchiveCard}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-rose-400 hover:bg-slate-900 transition"
-          >
-            <Trash2 className="w-3.5 h-3.5" /> Archive Role
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleArchiveCard}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-rose-400 hover:bg-slate-900 transition"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Archive Role
+            </button>
+            {app.status === 'RADAR' && onDemoteToLeads && (
+              <button
+                onClick={() => onDemoteToLeads(app)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-amber-300 hover:bg-slate-900 transition"
+              >
+                ← Move to Incoming Leads
+              </button>
+            )}
+          </div>
 
           {nextStage && (
             <button
