@@ -28,3 +28,7 @@ frontend/out/
 # OS
 .DS_Store
 Thumbs.db
+
+# Agent Local Skills & Caches
+.agents/
+
