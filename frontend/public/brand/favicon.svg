@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"><title>CareerOS</title><g transform="translate(-117.76 -117.76) scale(1.92)" fill="none">
+  
+  <!-- Inner Trailing Chevron: Slate-400 / Vault Base -->
+  <path d="M 64 72 L 120 128 L 64 184" stroke="#94A3B8" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Outer Leading Chevron: Electric Cyan #22D3EE / Progression -->
+  <path d="M 136 72 L 192 128 L 136 184" stroke="#22D3EE" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+</g></svg>

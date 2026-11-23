@@ -67,12 +67,16 @@ export default function Sidebar({
       <div>
         {/* Brand Header */}
         <div className="flex items-center gap-3 px-2 py-2 mb-6">
-          <div className="w-8 h-8 rounded-lg bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-bold text-sm">
-            C
+          <div className="w-8 h-8 rounded-lg bg-[#0E131F] border border-cyan-500/25 flex items-center justify-center p-1.5 shadow-sm shadow-cyan-950/50">
+            <img
+              src="/brand/careeros-symbol.svg"
+              alt="CareerOS Logo"
+              className="w-full h-full object-contain"
+            />
           </div>
           <div>
             <p className="text-sm font-semibold tracking-tight text-slate-100">
-              CareerOS
+              Career<span className="text-cyan-400">OS</span>
             </p>
             <p className="text-[11px] text-slate-500">Workspace</p>
           </div>
