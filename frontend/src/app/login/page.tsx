@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import CareerOSLogo from '@/components/CareerOSLogo';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -42,11 +43,11 @@ export default function LoginPage() {
     <div className="min-h-screen bg-[#0B0F17] text-slate-100 flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-[#111827] border border-slate-800 rounded-xl p-8 shadow-xl">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-9 h-9 rounded-lg bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-bold">
-            C
-          </div>
+          <CareerOSLogo className="w-9 h-9" />
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">CareerOS</h1>
+            <h1 className="text-lg font-semibold tracking-tight">
+              Career<span className="text-cyan-400">OS</span>
+            </h1>
             <p className="text-xs text-slate-400">Personal Application & Vault Workspace</p>
           </div>
         </div>
