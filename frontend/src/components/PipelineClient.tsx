@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, Search, AlertCircle, X, CheckCircle2, RefreshCw } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
@@ -46,12 +46,14 @@ export default function PipelineClient({
   initialLinks,
   unverifiedEvents,
   initialLeads = [],
+  initialKeywords = [],
 }: {
   initialApps: Application[];
   vaultDocs: VaultDocument[];
   initialLinks: { application_id: string; document_id: string }[];
   unverifiedEvents: UnverifiedEvent[];
   initialLeads?: JobLead[];
+  initialKeywords?: string[];
 }) {
   const supabase = createClient();
   const router = useRouter();
@@ -67,6 +69,53 @@ export default function PipelineClient({
   const [leads, setLeads] = useState<JobLead[]>(initialLeads);
   const [showClosed, setShowClosed] = useState(false);
   const [reviewEvents, setReviewEvents] = useState<UnverifiedEvent[]>(unverifiedEvents);
+  const [keywords, setKeywords] = useState<string[]>(initialKeywords);
+  const [keywordInput, setKeywordInput] = useState('');
+  const [leadFilterMode, setLeadFilterMode] = useState<'MATCHED' | 'ALL'>(
+    initialKeywords.length > 0 ? 'MATCHED' : 'ALL'
+  );
+
+  const persistKeywords = async (nextKeywords: string[]) => {
+    setKeywords(nextKeywords);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from('user_preferences').upsert({
+      user_id: user.id,
+      target_role_keywords: nextKeywords,
+      updated_at: new Date().toISOString(),
+    });
+  };
+
+  const handleAddKeyword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = keywordInput.trim();
+    if (!clean) return;
+    if (!keywords.some((k) => k.toLowerCase() === clean.toLowerCase())) {
+      const next = [...keywords, clean];
+      await persistKeywords(next);
+      setLeadFilterMode('MATCHED');
+    }
+    setKeywordInput('');
+  };
+
+  const handleRemoveKeyword = async (kw: string) => {
+    const next = keywords.filter((k) => k !== kw);
+    await persistKeywords(next);
+    if (next.length === 0) setLeadFilterMode('ALL');
+  };
+
+  const matchedLeads = useMemo(() => {
+    if (keywords.length === 0) return leads;
+    return leads.filter((lead) => {
+      const haystack = `${lead.role_title} ${lead.company_name}`.toLowerCase();
+      return keywords.some((kw) => haystack.includes(kw.toLowerCase()));
+    });
+  }, [leads, keywords]);
+
+  const visibleLeads =
+    leadFilterMode === 'MATCHED' && keywords.length > 0 ? matchedLeads : leads;
 
   // Add Job modal state
   const [companyName, setCompanyName] = useState('');
@@ -654,25 +703,89 @@ export default function PipelineClient({
           }}
           className="mt-6 bg-[#0E131F] border border-slate-800/80 rounded-xl p-4 transition-colors hover:border-amber-500/30"
         >
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                Incoming Job Alert Leads ({leads.length})
-              </h2>
-              <p className="text-[11px] text-slate-500">
-                Curated matches from your email alerts — click + Radar to track, drop a card here to demote, or × to dismiss.
-              </p>
+          <div className="flex flex-col gap-3 mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2.5">
+                  <h3 className="text-xs font-bold tracking-wider uppercase text-slate-300">
+                    Incoming Job Alert Leads ({visibleLeads.length})
+                  </h3>
+
+                  {/* Matched vs All Toggle */}
+                  <div className="inline-flex rounded-lg bg-slate-950/90 p-0.5 border border-slate-800 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setLeadFilterMode('MATCHED')}
+                      disabled={keywords.length === 0}
+                      className={`px-2.5 py-1 rounded-md font-medium transition ${
+                        leadFilterMode === 'MATCHED' && keywords.length > 0
+                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                          : 'text-slate-400 hover:text-slate-200 disabled:opacity-40'
+                      }`}
+                    >
+                      Matched to My Roles ({matchedLeads.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLeadFilterMode('ALL')}
+                      className={`px-2.5 py-1 rounded-md font-medium transition ${
+                        leadFilterMode === 'ALL' || keywords.length === 0
+                          ? 'bg-slate-800 text-slate-100'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      All Alerts ({leads.length})
+                    </button>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Curated matches from your email alerts — click + Radar to track, drop a card here to demote, or Dismiss.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleClearAllLeads}
+                className="text-xs text-slate-400 hover:text-slate-200 transition"
+              >
+                Clear All
+              </button>
             </div>
-            <button
-              onClick={handleClearAllLeads}
-              className="text-xs text-slate-500 hover:text-slate-300"
-            >
-              Clear All
-            </button>
+
+            {/* Editable Target Role Keywords Bar */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-800/70">
+              <span className="text-[11px] text-slate-500 mr-1">Target roles:</span>
+              {keywords.map((kw) => (
+                <span
+                  key={kw}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] bg-slate-800/90 text-cyan-300 border border-slate-700/80"
+                >
+                  {kw}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveKeyword(kw)}
+                    aria-label={`Remove ${kw}`}
+                    className="text-slate-400 hover:text-rose-400 ml-0.5"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+
+              <form onSubmit={handleAddKeyword} className="inline-flex items-center">
+                <input
+                  type="text"
+                  value={keywordInput}
+                  onChange={(e) => setKeywordInput(e.target.value)}
+                  placeholder="+ Filter keyword (e.g. Developer, Cashier)..."
+                  className="bg-slate-950/70 border border-slate-800 focus:border-cyan-500/50 rounded-md px-2 py-0.5 text-[11px] text-slate-200 placeholder:text-slate-600 outline-none w-56"
+                />
+              </form>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {leads.map((lead) => (
+            {visibleLeads.map((lead) => (
               <div
                 key={lead.id}
                 className="bg-[#111827] border border-slate-800 rounded-xl p-3 flex flex-col justify-between gap-2.5"

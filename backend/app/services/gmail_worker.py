@@ -194,7 +194,9 @@ def _parse_alert_items(msg: dict) -> list[dict]:
     )
 
     NAV_NOISE = re.compile(
-        r"^(sign in|unsubscribe|view all|see more|manage alerts|privacy|help|logo|apply now|read more|view job)$",
+        r"^(sign in|unsubscribe|view all|see more|see all jobs|manage (job )?alerts|edit alerts|"
+        r"privacy|help|logo|apply now|read more|view job|try premium.*|learn why.*|"
+        r"upload cv|run search|jobs|job placements|your job alert.*)$",
         re.IGNORECASE,
     )
 
@@ -202,6 +204,7 @@ def _parse_alert_items(msg: dict) -> list[dict]:
     for href, inner_html in anchor_matches:
         clean_title = re.sub(r"<[^>]+>", " ", inner_html)
         clean_title = html_lib.unescape(re.sub(r"\s+", " ", clean_title)).strip()
+        clean_title = clean_title.replace("â€“", "–").replace("â€™", "’")
         if len(clean_title) < 4 or len(clean_title) > 95 or NAV_NOISE.match(clean_title):
             continue
         if not any(d in href.lower() for d in ("indeed.com", "linkedin.com/comm/jobs", "pnet.co.za", "careers", "job")):
@@ -214,7 +217,7 @@ def _parse_alert_items(msg: dict) -> list[dict]:
             snippet_after = re.sub(r"<[^>]+>", "\n", html_body[after_idx + len(inner_html) : after_idx + len(inner_html) + 350])
             lines = [html_lib.unescape(line).strip() for line in snippet_after.splitlines() if line.strip()]
             if lines and 2 <= len(lines[0]) <= 70:
-                company_guess = lines[0]
+                company_guess = lines[0].replace("â€“", "–").replace("â€™", "’")
 
         extracted.append({
             "lead_key_id": f"{msg_id}:{len(extracted)}",

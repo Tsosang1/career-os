@@ -24,6 +24,9 @@ export default async function PipelinePage() {
     { data: links },
     { data: unverifiedEvents },
     { data: leads },
+    {
+      data: { user },
+    },
   ] = await Promise.all([
     supabase
       .from('applications')
@@ -44,7 +47,31 @@ export default async function PipelinePage() {
       .select('id, company_name, role_title, location_mode, source, portal_url, received_at')
       .eq('status', 'NEW')
       .order('received_at', { ascending: false }),
+    supabase.auth.getUser(),
   ]);
+
+  let initialKeywords: string[] = [];
+  if (user) {
+    const { data: prefs } = await supabase
+      .from('user_preferences')
+      .select('target_role_keywords')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    initialKeywords = prefs?.target_role_keywords ?? [];
+    if (!prefs && (applications?.length ?? 0) > 0) {
+      const corpus = (applications as Application[])
+        .map((a) => `${a.role_title} ${(a.tech_stack || []).join(' ')}`)
+        .join(' ')
+        .toLowerCase();
+
+      const candidateSeeds = [
+        'Software', 'Developer', 'Engineer', 'Data', 'AI', 'Graduate', 'Junior', 'Java', 'Python', 'Full-Stack',
+        'Cashier', 'Sales Assistant', 'Retail', 'Store', 'Supervisor',
+      ];
+      initialKeywords = candidateSeeds.filter((kw) => corpus.includes(kw.toLowerCase()));
+    }
+  }
 
   return (
     <PipelineClient
@@ -53,6 +80,7 @@ export default async function PipelinePage() {
       initialLinks={links ?? []}
       unverifiedEvents={(unverifiedEvents as UnverifiedEvent[]) ?? []}
       initialLeads={(leads as JobLead[]) ?? []}
+      initialKeywords={initialKeywords}
     />
   );
 }
