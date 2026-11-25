@@ -65,6 +65,7 @@ export default function PipelineClient({
   const [reviewOpen, setReviewOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [leads, setLeads] = useState<JobLead[]>(initialLeads);
+  const [showClosed, setShowClosed] = useState(false);
 
   // Add Job modal state
   const [companyName, setCompanyName] = useState('');
@@ -92,6 +93,9 @@ export default function PipelineClient({
       app.tech_stack.some((t) => t.toLowerCase().includes(q))
     );
   });
+
+  const activeApps = filteredApps.filter((a) => a.status !== 'CLOSED');
+  const closedApps = filteredApps.filter((a) => a.status === 'CLOSED');
 
   async function handleDrop(targetStatus: ApplicationStatus) {
     if (!draggedAppId) return;
@@ -347,7 +351,7 @@ export default function PipelineClient({
             Active Pipeline
           </h1>
           <span className="text-xs text-slate-500">
-            ({filteredApps.length} total)
+            ({activeApps.length} total)
           </span>
         </div>
 
@@ -362,6 +366,17 @@ export default function PipelineClient({
               className="w-full pl-9 pr-3 py-2 rounded-lg bg-[#111827] border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
             />
           </div>
+
+          <button
+            onClick={() => setShowClosed((prev) => !prev)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition ${
+              showClosed
+                ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                : 'bg-[#111827] hover:bg-slate-800 border-slate-700 text-slate-300'
+            }`}
+          >
+            Closed ({closedApps.length})
+          </button>
 
           <button
             onClick={handleGmailSync}
@@ -458,6 +473,59 @@ export default function PipelineClient({
           );
         })}
       </div>
+
+      {/* Closed / Archived Applications Strip */}
+      {showClosed && (
+        <div className="mt-6 bg-[#0E131F] border border-rose-500/20 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-rose-300">
+                Closed &amp; Unsuccessful ({closedApps.length})
+              </h2>
+              <p className="text-[11px] text-slate-500">
+                Click any card to view notes, context, or rejection details.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowClosed(false)}
+              className="text-xs text-slate-500 hover:text-slate-300"
+            >
+              Hide
+            </button>
+          </div>
+
+          {closedApps.length === 0 ? (
+            <p className="text-xs text-slate-500 italic py-2">
+              No closed applications match your current view.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {closedApps.map((app) => (
+                <div
+                  key={app.id}
+                  onClick={() => setSelectedAppId(app.id)}
+                  className="bg-[#111827] border border-slate-800 hover:border-rose-500/40 rounded-xl p-3 cursor-pointer transition"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold text-slate-200 truncate">
+                      {app.company_name}
+                    </p>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 font-medium shrink-0">
+                      CLOSED
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 truncate mt-1">
+                    {app.role_title}
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-1.5">
+                    {timeAgo(app.updated_at || app.created_at)} • {app.source || 'Manual'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Incoming Job Alert Leads Tray */}
       {leads.length > 0 && (

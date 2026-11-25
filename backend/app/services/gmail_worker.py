@@ -156,7 +156,7 @@ def _sync_and_fetch_leads(token: str, user_id: str, max_leads: int = 15) -> list
         .select("id, company_name, role_title, location_mode, source, portal_url, received_at")
         .eq("user_id", user_id)
         .eq("status", "NEW")
-        .order("received_at", ascending=False)
+        .order("received_at", desc=True)
         .execute()
     )
     return res.data or []

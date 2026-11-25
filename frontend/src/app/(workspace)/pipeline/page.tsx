@@ -27,7 +27,6 @@ export default async function PipelinePage() {
     supabase
       .from('applications')
       .select('*')
-      .neq('status', 'CLOSED')
       .order('updated_at', { ascending: false }),
     supabase
       .from('documents')
