@@ -10,6 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping Supabase Health
+        env:
+          SB_URL: ${{ secrets.SUPABASE_URL }}
+          SB_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          curl -sf "${{ secrets.SUPABASE_URL }}/auth/v1/health" \
-            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}"
+          CLEAN_URL=$(echo "$SB_URL" | tr -d '[:space:]')
+          CLEAN_KEY=$(echo "$SB_KEY" | tr -d '[:space:]')
+          curl -sS -f -o /dev/null -w "HTTP %{http_code}\n" \
+            "$CLEAN_URL/rest/v1/applications?select=id&limit=1" \
+            -H "apikey: $CLEAN_KEY"
