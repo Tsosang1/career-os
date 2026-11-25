@@ -14,14 +14,21 @@ import JobDrawer from './JobDrawer';
 
 export interface JobLead {
   id: string;
+  gmail_message_id?: string | null;
   company_name: string;
   role_title: string;
   location_mode?: string;
   source: string;
-  subject: string;
+  subject?: string;
   portal_url?: string;
   received_at?: string;
 }
+
+const getGmailUrl = (gmailMessageId?: string | null) => {
+  if (!gmailMessageId) return null;
+  const rawId = gmailMessageId.split(':')[0];
+  return `https://mail.google.com/mail/u/0/#all/${rawId}`;
+};
 
 
 const COLUMNS: { key: ApplicationStatus; label: string }[] = [
@@ -349,6 +356,8 @@ export default function PipelineClient({
     } = await supabase.auth.getUser();
     if (!user) return;
 
+    const emailUrl = getGmailUrl(lead.gmail_message_id);
+
     const { data, error } = await supabase
       .from('applications')
       .insert({
@@ -359,6 +368,7 @@ export default function PipelineClient({
         location_mode: lead.location_mode || 'South Africa',
         source: lead.source,
         portal_url: lead.portal_url || null,
+        scratchpad_md: emailUrl ? `Source email: ${emailUrl}` : '',
       })
       .select()
       .single();
@@ -854,6 +864,43 @@ export default function PipelineClient({
                     </p>
                   )}
                   <p className="text-[10px] text-slate-500 mt-1">{lead.source}</p>
+                  {(() => {
+                    const emailUrl = getGmailUrl(lead.gmail_message_id);
+                    const hasSeparateJobLink =
+                      lead.portal_url && !lead.portal_url.includes('mail.google.com');
+
+                    if (!hasSeparateJobLink && !emailUrl) return null;
+
+                    return (
+                      <div className="flex items-center gap-2 text-[11px] mt-1.5">
+                        {hasSeparateJobLink && (
+                          <a
+                            href={lead.portal_url!}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-cyan-400 hover:text-cyan-300 font-medium transition"
+                          >
+                            Job Link ↗
+                          </a>
+                        )}
+                        {hasSeparateJobLink && emailUrl && (
+                          <span className="text-slate-700">•</span>
+                        )}
+                        {emailUrl && (
+                          <a
+                            href={emailUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-slate-400 hover:text-slate-200 font-medium transition"
+                          >
+                            Email ↗
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="flex items-center justify-between pt-2 border-t border-slate-800/70">

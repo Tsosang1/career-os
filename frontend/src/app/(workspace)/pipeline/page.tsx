@@ -45,12 +45,12 @@ export default async function PipelinePage() {
       .order('occurred_at', { ascending: false }),
     supabase
       .from('job_leads')
-      .select('id, company_name, role_title, location_mode, source, portal_url, received_at')
+      .select('id, gmail_message_id, company_name, role_title, location_mode, source, portal_url, received_at')
       .eq('status', 'NEW')
       .order('received_at', { ascending: false }),
     supabase
       .from('job_leads')
-      .select('id, company_name, role_title, location_mode, source, portal_url, received_at')
+      .select('id, gmail_message_id, company_name, role_title, location_mode, source, portal_url, received_at')
       .eq('status', 'DISMISSED')
       .order('received_at', { ascending: false })
       .limit(50),

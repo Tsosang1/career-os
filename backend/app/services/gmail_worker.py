@@ -282,7 +282,7 @@ def _sync_and_fetch_leads(token: str, user_id: str, max_leads: int = 20) -> list
 
     res = (
         supabase.table("job_leads")
-        .select("id, company_name, role_title, location_mode, source, portal_url, received_at")
+        .select("id, gmail_message_id, company_name, role_title, location_mode, source, portal_url, received_at")
         .eq("user_id", user_id)
         .eq("status", "NEW")
         .order("received_at", desc=True)
