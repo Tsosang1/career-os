@@ -24,6 +24,7 @@ export default async function PipelinePage() {
     { data: links },
     { data: unverifiedEvents },
     { data: leads },
+    { data: dismissedLeads },
     {
       data: { user },
     },
@@ -47,6 +48,12 @@ export default async function PipelinePage() {
       .select('id, company_name, role_title, location_mode, source, portal_url, received_at')
       .eq('status', 'NEW')
       .order('received_at', { ascending: false }),
+    supabase
+      .from('job_leads')
+      .select('id, company_name, role_title, location_mode, source, portal_url, received_at')
+      .eq('status', 'DISMISSED')
+      .order('received_at', { ascending: false })
+      .limit(50),
     supabase.auth.getUser(),
   ]);
 
@@ -80,6 +87,7 @@ export default async function PipelinePage() {
       initialLinks={links ?? []}
       unverifiedEvents={(unverifiedEvents as UnverifiedEvent[]) ?? []}
       initialLeads={(leads as JobLead[]) ?? []}
+      initialDismissedLeads={(dismissedLeads as JobLead[]) ?? []}
       initialKeywords={initialKeywords}
     />
   );

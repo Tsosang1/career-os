@@ -46,6 +46,7 @@ export default function PipelineClient({
   initialLinks,
   unverifiedEvents,
   initialLeads = [],
+  initialDismissedLeads = [],
   initialKeywords = [],
 }: {
   initialApps: Application[];
@@ -53,6 +54,7 @@ export default function PipelineClient({
   initialLinks: { application_id: string; document_id: string }[];
   unverifiedEvents: UnverifiedEvent[];
   initialLeads?: JobLead[];
+  initialDismissedLeads?: JobLead[];
   initialKeywords?: string[];
 }) {
   const supabase = createClient();
@@ -67,11 +69,12 @@ export default function PipelineClient({
   const [reviewOpen, setReviewOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [leads, setLeads] = useState<JobLead[]>(initialLeads);
+  const [dismissedLeads, setDismissedLeads] = useState<JobLead[]>(initialDismissedLeads);
   const [showClosed, setShowClosed] = useState(false);
   const [reviewEvents, setReviewEvents] = useState<UnverifiedEvent[]>(unverifiedEvents);
   const [keywords, setKeywords] = useState<string[]>(initialKeywords);
   const [keywordInput, setKeywordInput] = useState('');
-  const [leadFilterMode, setLeadFilterMode] = useState<'MATCHED' | 'ALL'>(
+  const [leadFilterMode, setLeadFilterMode] = useState<'MATCHED' | 'ALL' | 'DISMISSED'>(
     initialKeywords.length > 0 ? 'MATCHED' : 'ALL'
   );
 
@@ -106,16 +109,24 @@ export default function PipelineClient({
     if (next.length === 0) setLeadFilterMode('ALL');
   };
 
+  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
   const matchedLeads = useMemo(() => {
     if (keywords.length === 0) return leads;
-    return leads.filter((lead) => {
-      const haystack = `${lead.role_title} ${lead.company_name}`.toLowerCase();
-      return keywords.some((kw) => haystack.includes(kw.toLowerCase()));
-    });
+    const patterns = keywords.map(
+      (kw) => new RegExp(`\\b${escapeRegex(kw)}\\b`, 'i')
+    );
+    return leads.filter((lead) =>
+      patterns.some((rx) => rx.test(lead.role_title))
+    );
   }, [leads, keywords]);
 
   const visibleLeads =
-    leadFilterMode === 'MATCHED' && keywords.length > 0 ? matchedLeads : leads;
+    leadFilterMode === 'DISMISSED'
+      ? dismissedLeads
+      : leadFilterMode === 'MATCHED' && keywords.length > 0
+        ? matchedLeads
+        : leads;
 
   // Add Job modal state
   const [companyName, setCompanyName] = useState('');
@@ -299,7 +310,11 @@ export default function PipelineClient({
   }
 
   async function handleDismissLead(leadId: string) {
+    const target = leads.find((l) => l.id === leadId);
     setLeads((prev) => prev.filter((l) => l.id !== leadId));
+    if (target) {
+      setDismissedLeads((prev) => [target, ...prev]);
+    }
     await supabase
       .from('job_leads')
       .update({ status: 'DISMISSED' })
@@ -307,14 +322,25 @@ export default function PipelineClient({
   }
 
   async function handleClearAllLeads() {
+    if (leads.length === 0) return;
+    const confirmed = window.confirm(
+      `Dismiss all ${leads.length} incoming job alert leads? You can still recover them from the "Dismissed" tab.`
+    );
+    if (!confirmed) return;
+
     const ids = leads.map((l) => l.id);
+    setDismissedLeads((prev) => [...leads, ...prev]);
     setLeads([]);
-    if (ids.length > 0) {
-      await supabase
-        .from('job_leads')
-        .update({ status: 'DISMISSED' })
-        .in('id', ids);
-    }
+    await supabase
+      .from('job_leads')
+      .update({ status: 'DISMISSED' })
+      .in('id', ids);
+  }
+
+  async function handleRestoreLead(lead: JobLead) {
+    setDismissedLeads((prev) => prev.filter((l) => l.id !== lead.id));
+    setLeads((prev) => [lead, ...prev]);
+    await supabase.from('job_leads').update({ status: 'NEW' }).eq('id', lead.id);
   }
 
   async function promoteLeadToRadar(lead: JobLead) {
@@ -693,7 +719,7 @@ export default function PipelineClient({
       )}
 
       {/* Incoming Job Alert Leads Tray */}
-      {leads.length > 0 && (
+      {(leads.length > 0 || dismissedLeads.length > 0) && (
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={() => {
@@ -729,12 +755,23 @@ export default function PipelineClient({
                       type="button"
                       onClick={() => setLeadFilterMode('ALL')}
                       className={`px-2.5 py-1 rounded-md font-medium transition ${
-                        leadFilterMode === 'ALL' || keywords.length === 0
+                        leadFilterMode === 'ALL' || (leadFilterMode === 'MATCHED' && keywords.length === 0)
                           ? 'bg-slate-800 text-slate-100'
                           : 'text-slate-400 hover:text-slate-200'
                       }`}
                     >
                       All Alerts ({leads.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLeadFilterMode('DISMISSED')}
+                      className={`px-2.5 py-1 rounded-md font-medium transition ${
+                        leadFilterMode === 'DISMISSED'
+                          ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      Dismissed ({dismissedLeads.length})
                     </button>
                   </div>
                 </div>
@@ -820,39 +857,50 @@ export default function PipelineClient({
                 </div>
 
                 <div className="flex items-center justify-between pt-2 border-t border-slate-800/70">
-                  <button
-                    onClick={() => handleDismissLead(lead.id)}
-                    className="text-[11px] text-slate-500 hover:text-rose-400"
-                  >
-                    Dismiss
-                  </button>
-                  {(() => {
-                    const existingMatch = findMatchingApplication(lead.company_name);
-                    if (existingMatch && existingMatch.status !== 'RADAR') {
-                      const isClosed = existingMatch.status === 'CLOSED';
-                      return (
-                        <button
-                          onClick={() => setSelectedAppId(existingMatch.id)}
-                          title={`You already have a ${existingMatch.status} card for ${existingMatch.company_name} — click to open it`}
-                          className={`px-2.5 py-1 rounded-md font-medium text-[11px] transition border ${
-                            isClosed
-                              ? 'bg-rose-500/10 border-rose-500/30 text-rose-300 hover:bg-rose-500/20'
-                              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
-                          }`}
-                        >
-                          ✓ In {existingMatch.status.charAt(0) + existingMatch.status.slice(1).toLowerCase()}
-                        </button>
-                      );
-                    }
-                    return (
+                  {leadFilterMode === 'DISMISSED' ? (
+                    <button
+                      onClick={() => handleRestoreLead(lead)}
+                      className="w-full py-1 rounded-md bg-slate-800 hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-300 font-medium text-[11px] transition"
+                    >
+                      ↺ Restore to Leads
+                    </button>
+                  ) : (
+                    <>
                       <button
-                        onClick={() => promoteLeadToRadar(lead)}
-                        className="px-2.5 py-1 rounded-md bg-cyan-500/15 hover:bg-cyan-500 text-cyan-400 hover:text-slate-950 font-medium text-[11px] transition"
+                        onClick={() => handleDismissLead(lead.id)}
+                        className="text-[11px] text-slate-500 hover:text-rose-400"
                       >
-                        + Radar
+                        Dismiss
                       </button>
-                    );
-                  })()}
+                      {(() => {
+                        const existingMatch = findMatchingApplication(lead.company_name);
+                        if (existingMatch && existingMatch.status !== 'RADAR') {
+                          const isClosed = existingMatch.status === 'CLOSED';
+                          return (
+                            <button
+                              onClick={() => setSelectedAppId(existingMatch.id)}
+                              title={`You already have a ${existingMatch.status} card for ${existingMatch.company_name} — click to open it`}
+                              className={`px-2.5 py-1 rounded-md font-medium text-[11px] transition border ${
+                                isClosed
+                                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-300 hover:bg-rose-500/20'
+                                  : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
+                              }`}
+                            >
+                              ✓ In {existingMatch.status.charAt(0) + existingMatch.status.slice(1).toLowerCase()}
+                            </button>
+                          );
+                        }
+                        return (
+                          <button
+                            onClick={() => promoteLeadToRadar(lead)}
+                            className="px-2.5 py-1 rounded-md bg-cyan-500/15 hover:bg-cyan-500 text-cyan-400 hover:text-slate-950 font-medium text-[11px] transition"
+                          >
+                            + Radar
+                          </button>
+                        );
+                      })()}
+                    </>
+                  )}
                 </div>
               </div>
             ))}

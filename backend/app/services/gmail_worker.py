@@ -194,9 +194,9 @@ def _parse_alert_items(msg: dict) -> list[dict]:
     )
 
     NAV_NOISE = re.compile(
-        r"^(sign in|unsubscribe|view all|see more|see all jobs|manage (job )?alerts|edit alerts|"
-        r"privacy|help|logo|apply now|read more|view job|try premium.*|learn why.*|"
-        r"upload cv|run search|jobs|job placements|your job alert.*)$",
+        r"^(sign in|unsubscribe|view all( results)?|see more|see all jobs|manage (job )?alerts|edit alerts|"
+        r"privacy( policy)?|help( center)?|click here|logo|apply now|read more|view job|try premium.*|learn why.*|"
+        r"upload cv|run search|jobs|job placements|your job alert.*|change the job agent frequency.*|careers\..*)$",
         re.IGNORECASE,
     )
 
