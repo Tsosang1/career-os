@@ -1,5 +1,4 @@
 from typing import Optional
-from rapidfuzz import fuzz, process
 
 def resolve_application_id(
     company_name: Optional[str],
@@ -7,24 +6,27 @@ def resolve_application_id(
     existing_apps: list[dict],
     existing_events: list[dict],
 ) -> Optional[str]:
-    # 1. Exact Gmail thread match first
-    for ev in existing_events:
-        if ev.get("gmail_thread_id") == thread_id and ev.get("application_id"):
-            return ev["application_id"]
+    # 1. Exact Gmail thread match
+    if thread_id:
+        for ev in existing_events:
+            if ev.get("gmail_thread_id") == thread_id and ev.get("application_id"):
+                return ev["application_id"]
 
-    if not company_name or not existing_apps:
-        return None
+    # 2. Normalized company name match (prefer active cards over already-closed ones)
+    if company_name:
+        target = company_name.strip().lower()
+        active_matches = [
+            a for a in existing_apps
+            if a.get("company_name") and target in a["company_name"].strip().lower() and a.get("status") != "CLOSED"
+        ]
+        if active_matches:
+            return active_matches[0]["id"]
 
-    # 2. Fuzzy company name match against active applications
-    choices = {app["id"]: app["company_name"] for app in existing_apps}
-    match = process.extractOne(
-        company_name,
-        choices,
-        scorer=fuzz.WRatio,
-        score_cutoff=78,
-    )
-    if match:
-        # match tuple is (matched_string, score, dict_key)
-        return match[2]
+        all_matches = [
+            a for a in existing_apps
+            if a.get("company_name") and target in a["company_name"].strip().lower()
+        ]
+        if all_matches:
+            return all_matches[0]["id"]
 
     return None
