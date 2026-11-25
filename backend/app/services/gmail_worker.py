@@ -1,9 +1,11 @@
 import asyncio
 import base64
+import html as html_lib
 import os
 import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from urllib.parse import unquote
 import httpx
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -41,8 +43,11 @@ ATS_LIFECYCLE_QUERY = (
 
 JOB_LEADS_QUERY = (
     'newer_than:14d ('
-    'from:jobalerts-noreply@linkedin.com OR subject:("job match for you" OR "New jobs posted from careers.")'
-    ') -subject:("Shop Assistant" OR "Cashier" OR "Store Associate")'
+    'from:jobalerts-noreply@linkedin.com '
+    'OR from:alert@indeed.com '
+    'OR from:alerts@pnet.co.za '
+    'OR subject:("job match for you" OR "New jobs posted from careers." OR "jobs in" OR "job alert" OR "new jobs matching")'
+    ')'
 )
 
 supabase = create_client(settings.supabase_url, settings.supabase_service_role_key)
@@ -96,17 +101,24 @@ async def _gmail_list_and_fetch(
         r.json() for r in responses if isinstance(r, httpx.Response) and r.status_code == 200
     ]
 
+def _normalize_lead_key(company: str, role: str) -> tuple[str, str]:
+    c = re.sub(r"\b(limited|ltd|pty|south africa)\b", "", company.lower())
+    c = re.sub(r"[^a-z0-9]", "", c)
+    r = re.sub(r"[^a-z0-9]", "", role.lower())
+    return (c, r)
+
+def _extract_html_body(payload: dict) -> str:
+    if payload.get("mimeType") == "text/html" and payload.get("body", {}).get("data"):
+        return base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", errors="ignore")
+    for part in payload.get("parts", []) or []:
+        found = _extract_html_body(part)
+        if found:
+            return found
+    return ""
+
 def _extract_job_url(payload: dict, msg_id: str) -> str:
     """Finds the direct job listing URL inside the email body, or falls back to the Gmail message."""
-    raw_html = ""
-    parts = payload.get("parts") or [payload]
-    for part in parts:
-        data = part.get("body", {}).get("data")
-        if data:
-            try:
-                raw_html += base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
-            except Exception:
-                pass
+    raw_html = _extract_html_body(payload)
 
     linkedin_match = re.search(r"https://www\.linkedin\.com/comm/jobs/view/\d+[^\s\"'<>]*", raw_html)
     if linkedin_match:
@@ -114,53 +126,156 @@ def _extract_job_url(payload: dict, msg_id: str) -> str:
 
     return f"https://mail.google.com/mail/u/0/#all/{msg_id}"
 
-def _sync_and_fetch_leads(token: str, user_id: str, max_leads: int = 15) -> list[dict]:
-    msgs = asyncio.run(
-        _gmail_list_and_fetch(token, JOB_LEADS_QUERY, max_leads, set(), fmt="full")
+def _parse_alert_items(msg: dict) -> list[dict]:
+    """
+    Returns 1 item for single-job alerts, or N items for multi-job digests,
+    with ZERO hardcoded role blocklists.
+    """
+    msg_id = msg["id"]
+    payload = msg.get("payload", {})
+    headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
+    subject = headers.get("Subject", "").strip()
+    sender = headers.get("From", "")
+    raw_date = headers.get("Date", "")
+
+    received_iso = datetime.now(timezone.utc).isoformat()
+    if raw_date:
+        try:
+            received_iso = parsedate_to_datetime(raw_date).isoformat()
+        except Exception:
+            pass
+
+    source_label = (
+        "LinkedIn Alert" if "linkedin" in sender.lower()
+        else "Indeed Alert" if "indeed" in sender.lower()
+        else "PNet Alert" if "pnet" in sender.lower()
+        else "Email Alert"
+    )
+    fallback_url = f"https://mail.google.com/mail/u/0/#all/{msg_id}"
+
+    # 1. Single-role subject patterns (e.g. "Java Developer (Junior) at Discovery Limited")
+    at_match = re.match(
+        r"^(?:You may be a fit for\s+)?(.+?)\s+(?:at|@)\s+(.+?)(?:\s+in\s+South Africa.*)?$",
+        subject,
+        re.IGNORECASE,
+    )
+    if at_match:
+        return [{
+            "lead_key_id": msg_id,
+            "company_name": at_match.group(2).split(" - ")[0].strip(" '\"")[0:80],
+            "role_title": at_match.group(1).strip(" '\"")[0:100],
+            "location_mode": "South Africa",
+            "source": source_label,
+            "portal_url": _extract_job_url(payload, msg_id) or fallback_url,
+            "received_at": received_iso,
+        }]
+
+    if "vodafone job match" in subject.lower():
+        return [{
+            "lead_key_id": msg_id,
+            "company_name": "Vodacom / Vodafone",
+            "role_title": "Graduate / Early Careers Match",
+            "location_mode": "South Africa",
+            "source": source_label,
+            "portal_url": _extract_job_url(payload, msg_id) or fallback_url,
+            "received_at": received_iso,
+        }]
+
+    # 2. Multi-job digest extraction (e.g. Indeed / LinkedIn multi-posting HTML emails)
+    html_body = _extract_html_body(payload)
+    if not html_body:
+        return []
+
+    # Match <a href="URL">Role Title</a> followed closely by Company text
+    anchor_matches = re.findall(
+        r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
+        html_body,
+        flags=re.IGNORECASE | re.DOTALL,
     )
 
-    for msg in msgs:
-        payload = msg.get("payload", {})
-        headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
-        subject = headers.get("Subject", "").strip()
-        sender = headers.get("From", "")
-        raw_date = headers.get("Date", "")
+    NAV_NOISE = re.compile(
+        r"^(sign in|unsubscribe|view all|see more|manage alerts|privacy|help|logo|apply now|read more|view job)$",
+        re.IGNORECASE,
+    )
 
-        received_iso = None
-        if raw_date:
-            try:
-                received_iso = parsedate_to_datetime(raw_date).isoformat()
-            except Exception:
-                received_iso = None
-
-        at_match = re.match(
-            r"^(?:You may be a fit for\s+)?(.+?)\s+(?:at|@)\s+(.+?)(?:\s+in\s+South Africa.*)?$",
-            subject,
-            re.IGNORECASE,
-        )
-        if at_match:
-            role_title = at_match.group(1).strip(" '\"")
-            company_name = at_match.group(2).split(" - ")[0].strip(" '\"")
-        elif "Vodafone job match" in subject:
-            company_name = "Vodacom / Vodafone"
-            role_title = "Graduate / Early Careers Match"
-        else:
+    extracted = []
+    for href, inner_html in anchor_matches:
+        clean_title = re.sub(r"<[^>]+>", " ", inner_html)
+        clean_title = html_lib.unescape(re.sub(r"\s+", " ", clean_title)).strip()
+        if len(clean_title) < 4 or len(clean_title) > 95 or NAV_NOISE.match(clean_title):
+            continue
+        if not any(d in href.lower() for d in ("indeed.com", "linkedin.com/comm/jobs", "pnet.co.za", "careers", "job")):
             continue
 
-        supabase.table("job_leads").upsert(
-            {
-                "user_id": user_id,
-                "gmail_message_id": msg["id"],
-                "company_name": company_name[:80],
-                "role_title": role_title[:100],
-                "location_mode": "South Africa",
-                "source": "LinkedIn Alert" if "linkedin" in sender.lower() else "Email Alert",
-                "portal_url": _extract_job_url(payload, msg["id"]),
-                "received_at": received_iso or datetime.now(timezone.utc).isoformat(),
-            },
-            on_conflict="user_id,gmail_message_id",
-            ignore_duplicates=True,
-        ).execute()
+        # Grab the text immediately following the closing </a> tag to infer the company name
+        after_idx = html_body.find(inner_html)
+        company_guess = source_label.replace(" Alert", "")
+        if after_idx != -1:
+            snippet_after = re.sub(r"<[^>]+>", "\n", html_body[after_idx + len(inner_html) : after_idx + len(inner_html) + 350])
+            lines = [html_lib.unescape(line).strip() for line in snippet_after.splitlines() if line.strip()]
+            if lines and 2 <= len(lines[0]) <= 70:
+                company_guess = lines[0]
+
+        extracted.append({
+            "lead_key_id": f"{msg_id}:{len(extracted)}",
+            "company_name": company_guess[:80],
+            "role_title": clean_title[:100],
+            "location_mode": "South Africa",
+            "source": source_label,
+            "portal_url": html_lib.unescape(unquote(href)) if href.startswith("http") else fallback_url,
+            "received_at": received_iso,
+        })
+        if len(extracted) >= 12:
+            break
+
+    return extracted
+
+def _sync_and_fetch_leads(token: str, user_id: str, max_leads: int = 20) -> list[dict]:
+    existing_res = (
+        supabase.table("job_leads")
+        .select("gmail_message_id, company_name, role_title")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    existing_rows = existing_res.data or []
+    known_msg_prefixes = {r["gmail_message_id"].split(":")[0] for r in existing_rows if r.get("gmail_message_id")}
+    known_pairs = {
+        _normalize_lead_key(r["company_name"], r["role_title"])
+        for r in existing_rows
+        if r.get("company_name") and r.get("role_title")
+    }
+
+    raw_msgs = asyncio.run(
+        _gmail_list_and_fetch(
+            token,
+            JOB_LEADS_QUERY,
+            max_results=max_leads,
+            skip_ids=known_msg_prefixes,
+            fmt="full",
+        )
+    )
+
+    for msg in raw_msgs:
+        for item in _parse_alert_items(msg):
+            pair = _normalize_lead_key(item["company_name"], item["role_title"])
+            if pair in known_pairs:
+                continue
+            known_pairs.add(pair)
+
+            supabase.table("job_leads").upsert(
+                {
+                    "user_id": user_id,
+                    "gmail_message_id": item["lead_key_id"],
+                    "company_name": item["company_name"],
+                    "role_title": item["role_title"],
+                    "location_mode": item["location_mode"],
+                    "source": item["source"],
+                    "portal_url": item["portal_url"],
+                    "received_at": item["received_at"],
+                },
+                on_conflict="user_id,gmail_message_id",
+                ignore_duplicates=True,
+            ).execute()
 
     res = (
         supabase.table("job_leads")

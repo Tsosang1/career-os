@@ -98,6 +98,34 @@ export default function PipelineClient({
   const activeApps = filteredApps.filter((a) => a.status !== 'CLOSED');
   const closedApps = filteredApps.filter((a) => a.status === 'CLOSED');
 
+  const normalizeCompany = (name: string) =>
+    name
+      .toLowerCase()
+      .replace(/\b(limited|ltd|pty|people acquisition|careers|solutions group|south africa)\b/g, '')
+      .replace(/[^a-z0-9]/g, '')
+      .trim();
+
+  // Prefer an in-flight card (Applied → Offer), then Closed, then Radar.
+  const MATCH_PRIORITY: Record<ApplicationStatus, number> = {
+    OFFER: 0,
+    INTERVIEW: 0,
+    ASSESSMENT: 0,
+    APPLIED: 0,
+    CLOSED: 1,
+    RADAR: 2,
+  };
+
+  const findMatchingApplication = (leadCompany: string): Application | null => {
+    const target = normalizeCompany(leadCompany);
+    if (target.length < 3) return null;
+    const matches = apps.filter((a) => {
+      const appNorm = normalizeCompany(a.company_name);
+      return appNorm.length >= 3 && (appNorm.includes(target) || target.includes(appNorm));
+    });
+    if (matches.length === 0) return null;
+    return [...matches].sort((x, y) => MATCH_PRIORITY[x.status] - MATCH_PRIORITY[y.status])[0];
+  };
+
   async function handleDrop(targetStatus: ApplicationStatus) {
     if (!draggedAppId) return;
     const moving = apps.find((a) => a.id === draggedAppId);
@@ -685,12 +713,33 @@ export default function PipelineClient({
                   >
                     Dismiss
                   </button>
-                  <button
-                    onClick={() => promoteLeadToRadar(lead)}
-                    className="px-2.5 py-1 rounded-md bg-cyan-500/15 hover:bg-cyan-500 text-cyan-400 hover:text-slate-950 font-medium text-[11px] transition"
-                  >
-                    + Radar
-                  </button>
+                  {(() => {
+                    const existingMatch = findMatchingApplication(lead.company_name);
+                    if (existingMatch && existingMatch.status !== 'RADAR') {
+                      const isClosed = existingMatch.status === 'CLOSED';
+                      return (
+                        <button
+                          onClick={() => setSelectedAppId(existingMatch.id)}
+                          title={`You already have a ${existingMatch.status} card for ${existingMatch.company_name} — click to open it`}
+                          className={`px-2.5 py-1 rounded-md font-medium text-[11px] transition border ${
+                            isClosed
+                              ? 'bg-rose-500/10 border-rose-500/30 text-rose-300 hover:bg-rose-500/20'
+                              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
+                          }`}
+                        >
+                          ✓ In {existingMatch.status.charAt(0) + existingMatch.status.slice(1).toLowerCase()}
+                        </button>
+                      );
+                    }
+                    return (
+                      <button
+                        onClick={() => promoteLeadToRadar(lead)}
+                        className="px-2.5 py-1 rounded-md bg-cyan-500/15 hover:bg-cyan-500 text-cyan-400 hover:text-slate-950 font-medium text-[11px] transition"
+                      >
+                        + Radar
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
             ))}
