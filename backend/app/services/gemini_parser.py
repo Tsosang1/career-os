@@ -64,6 +64,22 @@ def _parse_json_object(raw_text: str) -> dict:
         cleaned = cleaned[start : end + 1]
     return json.loads(cleaned)
 
+def _get_active_gemini_model() -> str:
+    try:
+        models = [
+            m.name.replace("models/", "")
+            for m in gemini_client.models.list()
+            if m.name and "generateContent" in (m.supported_actions or [])
+        ]
+        # Prefer Gemini 4 Hydrogen or 3.8 Flash if available
+        for preferred in ("gemini-4-hydrogen", "gemini-3.8-flash", "gemini-3.8-flash-lite"):
+            for m in models:
+                if preferred in m:
+                    return m
+        return models[0] if models else "gemini-3.8-flash"
+    except Exception:
+        return "gemini-3.8-flash"
+
 def classify_email_batch(emails: list[dict]) -> dict[int, ParsedAtsEmail]:
     results: dict[int, ParsedAtsEmail] = {}
     to_classify = []
@@ -92,13 +108,19 @@ def classify_email_batch(emails: list[dict]) -> dict[int, ParsedAtsEmail]:
     print(f"[Parser] Batch-classifying {len(to_classify)} remaining emails...", flush=True)
     user_payload = json.dumps(to_classify, ensure_ascii=False)
 
-    # 1. Try active Groq models without strict json_object schema validation
+    # 1. Pick actual chat/text models on Groq (skip audio/orpheus/guard/whisper)
     if groq_client:
         try:
-            active_models = [
+            excluded = ("whisper", "guard", "tts", "orpheus", "canopylabs")
+            all_ids = [
                 m.id for m in groq_client.models.list().data
-                if "whisper" not in m.id and "guard" not in m.id and "tts" not in m.id
+                if not any(x in m.id.lower() for x in excluded)
             ]
+            preferred = [
+                m for m in all_ids
+                if any(k in m.lower() for k in ("gpt-oss", "llama", "qwen", "gemma", "deepseek", "mistral"))
+            ]
+            active_models = preferred or all_ids
         except Exception:
             active_models = ["openai/gpt-oss-20b"]
 
@@ -128,10 +150,11 @@ def classify_email_batch(emails: list[dict]) -> dict[int, ParsedAtsEmail]:
             except Exception as exc:
                 print(f"[Parser] Groq {model_name} failed: {exc}", flush=True)
 
-    # 2. Valid Gemini 2.5 Flash fallback
+    # 2. Auto-discovered Gemini fallback
     try:
+        gemini_model = _get_active_gemini_model()
         response = gemini_client.models.generate_content(
-            model="gemini-2.5-flash",
+            model=gemini_model,
             contents=user_payload,
             config=types.GenerateContentConfig(
                 system_instruction=BATCH_SYSTEM_PROMPT,
@@ -150,7 +173,7 @@ def classify_email_batch(emails: list[dict]) -> dict[int, ParsedAtsEmail]:
                 confidence_score=float(row.get("confidence_score", 0.0)),
                 summary=row.get("summary", ""),
             )
-        print("[Parser] Gemini 2.5 Flash fallback succeeded!", flush=True)
+        print(f"[Parser] Gemini ({gemini_model}) fallback succeeded!", flush=True)
     except Exception as exc:
         print(f"[Parser] Gemini fallback failed: {exc}", flush=True)
 
