@@ -24,7 +24,7 @@ NOISE_PATTERNS = re.compile(
 )
 
 REJECTION_PATTERNS = re.compile(
-    r"(regret to inform|unable to offer you employment|unsuccessful|not been selected|not moving forward|position has been filled|isn't progressing|not progressing|not to take your application further)",
+    r"(regret to inform|unable to offer you employment|unsuccessful|not been selected|not moving forward|position has been filled|isn['’]t progressing|not progressing|not to take your application further)",
     re.IGNORECASE,
 )
 

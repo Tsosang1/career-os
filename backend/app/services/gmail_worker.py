@@ -185,7 +185,13 @@ def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
 
     print("[Sync 1/4] Querying & batch-fetching Gmail ATS messages via httpx...", flush=True)
     fetched_msgs = asyncio.run(
-        _gmail_list_and_fetch(token, ATS_LIFECYCLE_QUERY, max_results, seen_ids, fmt="metadata")
+        _gmail_list_and_fetch(
+            token,
+            ATS_LIFECYCLE_QUERY,
+            max(max_results, 60),
+            seen_ids,
+            fmt="metadata",
+        )
     )
     print(f"[Sync 2/4] Fetched {len(fetched_msgs)} unseen messages.", flush=True)
 
