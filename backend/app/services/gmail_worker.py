@@ -1,10 +1,10 @@
 import os
 import re
-import socket
+import asyncio
 import base64
+import httpx
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
-from concurrent.futures import ThreadPoolExecutor
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -14,8 +14,6 @@ from supabase import create_client
 from app.config import settings
 from app.services.gemini_parser import classify_email_batch
 from app.services.entity_resolver import resolve_application_id
-
-socket.setdefaulttimeout(15)  # Prevent googleapiclient / httplib2 from hanging forever
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
@@ -54,7 +52,37 @@ def get_gmail_service():
             raise RuntimeError(
                 "Gmail token.json is missing or expired. Re-authorize via CLI before syncing."
             )
-    return build("gmail", "v1", credentials=creds)
+    return build("gmail", "v1", credentials=creds), creds
+
+async def _async_fetch_messages(access_token: str, msg_ids: list[str], fmt: str = "metadata") -> list[dict]:
+    if not msg_ids:
+        return []
+    headers = {"Authorization": f"Bearer {access_token}"}
+    params = (
+        [("format", "metadata"), ("metadataHeaders", "From"), ("metadataHeaders", "Subject")]
+        if fmt == "metadata"
+        else [("format", fmt)]
+    )
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        tasks = [
+            client.get(
+                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{mid}",
+                headers=headers,
+                params=params,
+            )
+            for mid in msg_ids
+        ]
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+    results = []
+    for resp in responses:
+        if isinstance(resp, httpx.Response) and resp.status_code == 200:
+            results.append(resp.json())
+    return results
+
+def _batch_fetch_messages(creds, msg_ids: list[str], fmt: str = "metadata", metadata_headers=None) -> list[dict]:
+    return asyncio.run(_async_fetch_messages(creds.token, msg_ids, fmt=fmt))
 
 def _extract_job_url(payload: dict, msg_id: str) -> str:
     """Finds the direct job listing URL inside the email body, or falls back to the Gmail message."""
@@ -160,7 +188,7 @@ def _sync_and_fetch_leads(service, user_id: str, max_leads: int = 15) -> list[di
     return res.data or []
 
 def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
-    service = get_gmail_service()
+    service, creds = get_gmail_service()
 
     events_res = (
         supabase.table("application_events")
@@ -190,35 +218,21 @@ def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
     candidate_items = [item for item in msg_list if item["id"] not in seen_ids]
     print(f"[Sync 2/4] Batch-fetching {len(candidate_items)} unseen messages...", flush=True)
 
-    def _fetch_msg_metadata(item):
-        msg_id = item["id"]
-        try:
-            msg = (
-                service.users()
-                .messages()
-                .get(userId="me", id=msg_id, format="metadata", metadataHeaders=["From", "Subject"])
-                .execute()
-            )
-            headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
-            return {
-                "msg_id": msg_id,
-                "thread_id": msg.get("threadId", ""),
-                "sender": headers.get("From", ""),
-                "subject": headers.get("Subject", ""),
-                "snippet": msg.get("snippet", ""),
-            }
-        except Exception as exc:
-            print(f"[Msg Metadata Error] id {msg_id}: {exc}", flush=True)
-            return None
-
     unseen_emails = []
     if candidate_items:
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            fetched_metadata = list(executor.map(_fetch_msg_metadata, candidate_items))
-        for m in fetched_metadata:
-            if m:
-                m["index"] = len(unseen_emails)
-                unseen_emails.append(m)
+        fetched_msgs = _batch_fetch_messages(creds, [item["id"] for item in candidate_items], fmt="metadata")
+        for msg in fetched_msgs:
+            headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
+            unseen_emails.append(
+                {
+                    "index": len(unseen_emails),
+                    "msg_id": msg["id"],
+                    "thread_id": msg.get("threadId", ""),
+                    "sender": headers.get("From", ""),
+                    "subject": headers.get("Subject", ""),
+                    "snippet": msg.get("snippet", ""),
+                }
+            )
 
     matched = 0
     staged = 0
