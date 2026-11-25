@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Plus, Search, AlertCircle, X, CheckCircle2, RefreshCw } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
@@ -567,6 +568,13 @@ export default function PipelineClient({
             <Plus className="w-4 h-4" />
             Add Job
           </button>
+
+          <Link
+            href="/settings"
+            className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs font-medium text-slate-300 hover:text-white transition"
+          >
+            Settings
+          </Link>
         </div>
       </div>
 
