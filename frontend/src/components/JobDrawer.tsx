@@ -178,7 +178,7 @@ export default function JobDrawer({
         aria-label="Close drawer backdrop"
       />
 
-      <aside className="w-full max-w-2xl bg-[#0E131F] border-l border-slate-800 h-full flex flex-col justify-between shadow-2xl">
+      <aside className="w-full sm:max-w-lg md:max-w-2xl bg-[#0E131F] border-l border-slate-800 h-full flex flex-col justify-between shadow-2xl">
         {/* Drawer Header */}
         <div className="p-6 border-b border-slate-800">
           <div className="flex items-start justify-between gap-4">

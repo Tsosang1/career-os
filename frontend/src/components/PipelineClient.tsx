@@ -519,9 +519,9 @@ export default function PipelineClient({
       )}
 
       {/* Top Header & Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-6">
         <div className="flex items-baseline gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-100">
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-100">
             Active Pipeline
           </h1>
           <span className="text-xs text-slate-500">
@@ -529,8 +529,8 @@ export default function PipelineClient({
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="relative w-60">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+          <div className="relative w-full sm:w-64">
             <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
@@ -541,45 +541,47 @@ export default function PipelineClient({
             />
           </div>
 
-          <button
-            onClick={() => setShowClosed((prev) => !prev)}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition ${
-              showClosed
-                ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
-                : 'bg-[#111827] hover:bg-slate-800 border-slate-700 text-slate-300'
-            }`}
-          >
-            Closed ({closedApps.length})
-          </button>
+          <div className="grid grid-cols-2 sm:flex items-center gap-2">
+            <button
+              onClick={() => setShowClosed((prev) => !prev)}
+              className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition ${
+                showClosed
+                  ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                  : 'bg-[#111827] hover:bg-slate-800 border-slate-700 text-slate-300'
+              }`}
+            >
+              Closed ({closedApps.length})
+            </button>
 
-          <button
-            onClick={handleGmailSync}
-            disabled={syncing}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#111827] hover:bg-slate-800 border border-slate-700 text-slate-200 font-medium text-xs transition disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin text-cyan-400' : ''}`} />
-            {syncing ? 'Syncing...' : 'Sync Gmail'}
-          </button>
+            <button
+              onClick={handleGmailSync}
+              disabled={syncing}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#111827] hover:bg-slate-800 border border-slate-700 text-slate-200 font-medium text-xs transition disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin text-cyan-400' : ''}`} />
+              {syncing ? 'Syncing...' : 'Sync Gmail'}
+            </button>
 
-          <button
-            onClick={() => setAddOpen(true)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-medium text-xs transition"
-          >
-            <Plus className="w-4 h-4" />
-            Add Job
-          </button>
+            <button
+              onClick={() => setAddOpen(true)}
+              className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-medium text-xs transition"
+            >
+              <Plus className="w-4 h-4" />
+              Add Job
+            </button>
 
-          <Link
-            href="/settings"
-            className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs font-medium text-slate-300 hover:text-white transition"
-          >
-            Settings
-          </Link>
+            <Link
+              href="/settings"
+              className="flex items-center justify-center px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs font-medium text-slate-300 hover:text-white transition"
+            >
+              Settings
+            </Link>
+          </div>
         </div>
       </div>
 
-      {/* 5-Column Kanban Board */}
-      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-4 flex-1 items-start">
+      {/* 5-Column Kanban Board (Horizontal swipeable on mobile, 5-col grid on xl) */}
+      <div className="flex xl:grid xl:grid-cols-5 gap-3.5 overflow-x-auto snap-x snap-mandatory pb-3 -mx-4 px-4 xl:mx-0 xl:px-0 flex-1 items-start">
         {COLUMNS.map((col) => {
           const colApps = filteredApps.filter((a) => a.status === col.key);
           return (
@@ -587,7 +589,7 @@ export default function PipelineClient({
               key={col.key}
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => handleDrop(col.key)}
-              className="bg-[#0E131F] border border-slate-800/80 rounded-xl p-3 min-h-[520px] flex flex-col"
+              className="min-w-[82vw] sm:min-w-[300px] xl:min-w-0 snap-center bg-[#0E131F] border border-slate-800/80 rounded-xl p-3 min-h-[420px] xl:min-h-[520px] flex flex-col"
             >
               {/* Column Header */}
               <div className="flex items-center justify-between px-1.5 pb-3 mb-2 border-b border-slate-800/70">
@@ -827,13 +829,13 @@ export default function PipelineClient({
                 </span>
               ))}
 
-              <form onSubmit={handleAddKeyword} className="inline-flex items-center">
+              <form onSubmit={handleAddKeyword} className="inline-flex items-center w-full sm:w-auto">
                 <input
                   type="text"
                   value={keywordInput}
                   onChange={(e) => setKeywordInput(e.target.value)}
                   placeholder="+ Filter keyword (e.g. Developer, Cashier)..."
-                  className="bg-slate-950/70 border border-slate-800 focus:border-cyan-500/50 rounded-md px-2 py-0.5 text-[11px] text-slate-200 placeholder:text-slate-600 outline-none w-56"
+                  className="bg-slate-950/70 border border-slate-800 focus:border-cyan-500/50 rounded-md px-2 py-0.5 text-[11px] text-slate-200 placeholder:text-slate-600 outline-none w-full sm:w-56"
                 />
               </form>
             </div>

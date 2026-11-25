@@ -64,7 +64,25 @@ export default function Sidebar({
   }
 
   return (
-    <aside className="w-60 shrink-0 bg-[#0E131F] border-r border-slate-800/80 flex flex-col justify-between p-4 select-none">
+    <>
+      {/* Mobile Top Bar */}
+      <header className="md:hidden sticky top-0 z-30 bg-[#0E131F]/95 backdrop-blur border-b border-slate-800/80 px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <CareerOSLogo className="w-7 h-7" />
+          <span className="text-sm font-semibold tracking-tight text-slate-100">
+            Career<span className="text-cyan-400">OS</span>
+          </span>
+        </div>
+        <Link
+          href="/settings"
+          className="text-xs px-2.5 py-1 rounded-md bg-slate-900 border border-slate-800 text-slate-300"
+        >
+          Settings
+        </Link>
+      </header>
+
+      {/* Desktop Sidebar (hidden on mobile) */}
+      <aside className="hidden md:flex w-60 shrink-0 bg-[#0E131F] border-r border-slate-800/80 flex-col justify-between p-4 select-none">
       <div>
         {/* Brand Header */}
         <div className="flex items-center gap-3 px-2 py-2 mb-6">
@@ -149,5 +167,29 @@ export default function Sidebar({
         </div>
       </div>
     </aside>
+
+      {/* Mobile Bottom Tab Bar */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-[#0E131F]/95 backdrop-blur border-t border-slate-800/80 grid grid-cols-4 py-2 px-1">
+        {[
+          ...navItems,
+          { href: '/settings', label: 'Settings', icon: FileCheck2 },
+        ].map((item) => {
+          const Icon = item.icon;
+          const active = pathname.startsWith(item.href);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flex flex-col items-center justify-center gap-0.5 py-1 rounded-lg text-[11px] font-medium transition ${
+                active ? 'text-cyan-400' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
+    </>
   );
 }

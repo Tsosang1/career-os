@@ -26,9 +26,9 @@ export default async function WorkspaceLayout({
     .order('created_at', { ascending: true });
 
   return (
-    <div className="min-h-screen bg-[#0B0F17] text-slate-100 flex">
+    <div className="min-h-screen bg-[#0B0F17] text-slate-100 flex flex-col md:flex-row">
       <Sidebar pinnedDocs={pinnedDocs ?? []} userEmail={user.email ?? ''} />
-      <main className="flex-1 min-w-0 overflow-y-auto">{children}</main>
+      <main className="flex-1 min-w-0 overflow-y-auto pb-20 md:pb-0">{children}</main>
     </div>
   );
 }
