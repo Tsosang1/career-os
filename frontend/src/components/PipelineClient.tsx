@@ -284,7 +284,7 @@ export default function PipelineClient({
 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
+      const timeout = setTimeout(() => controller.abort(), 65000);
       const res = await fetch(`${apiUrl}/emails/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -306,7 +306,7 @@ export default function PipelineClient({
       router.refresh();
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === 'AbortError') {
-        alert('Gmail sync timed out after 30s. Check your uvicorn terminal for progress.');
+        alert('Gmail sync timed out after 65s. Check your uvicorn terminal for progress.');
       } else {
         alert(
           `Sync request failed (${err instanceof Error ? err.message : 'Network/CORS error'}). Check your uvicorn terminal.`

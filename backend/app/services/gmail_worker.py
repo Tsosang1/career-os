@@ -1,14 +1,14 @@
 import asyncio
 import base64
 import html as html_lib
+import json
 import os
 import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 from urllib.parse import unquote
 import httpx
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
 from supabase import create_client
 
 from app.config import settings
@@ -52,18 +52,64 @@ JOB_LEADS_QUERY = (
 
 supabase = create_client(settings.supabase_url, settings.supabase_service_role_key)
 
-def _get_access_token() -> str:
-    if not os.path.exists("token.json"):
-        raise RuntimeError("token.json missing in backend/.")
-    creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-    if not creds.valid:
-        if creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            with open("token.json", "w") as f:
-                f.write(creds.to_json())
-        else:
-            raise RuntimeError("Gmail token expired; re-authorize.")
-    return creds.token
+TOKEN_PATH = Path(__file__).resolve().parents[2] / "token.json"
+
+def _save_token_to_supabase(user_id: str, token_data: dict) -> None:
+    supabase.table("user_integrations").upsert(
+        {
+            "user_id": user_id,
+            "provider": "gmail",
+            "token_json": token_data,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+        on_conflict="user_id",
+    ).execute()
+
+def _get_access_token(user_id: str) -> str:
+    res = (
+        supabase.table("user_integrations")
+        .select("token_json")
+        .eq("user_id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    token_data = (res.data or {}).get("token_json")
+
+    # Auto-seed from local token.json on first run if present
+    if not token_data and TOKEN_PATH.exists():
+        token_data = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
+        _save_token_to_supabase(user_id, token_data)
+
+    if not token_data:
+        raise RuntimeError("No Gmail token found in user_integrations for this user.")
+
+    # Refresh the access token using the stored refresh_token
+    refresh_token = token_data.get("refresh_token")
+    client_id = token_data.get("client_id") or os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = token_data.get("client_secret") or os.getenv("GOOGLE_CLIENT_SECRET")
+
+    if refresh_token and client_id and client_secret:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+            )
+            if resp.status_code == 200:
+                refreshed = resp.json()
+                token_data["token"] = refreshed["access_token"]
+                _save_token_to_supabase(user_id, token_data)
+                if TOKEN_PATH.exists():
+                    TOKEN_PATH.write_text(json.dumps(token_data, indent=2), encoding="utf-8")
+
+    access_token = token_data.get("token") or token_data.get("access_token")
+    if not access_token:
+        raise RuntimeError("Gmail access token missing or expired.")
+    return access_token
 
 async def _gmail_list_and_fetch(
     token: str,
@@ -291,7 +337,7 @@ def _sync_and_fetch_leads(token: str, user_id: str, max_leads: int = 20) -> list
     return res.data or []
 
 def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
-    token = _get_access_token()
+    token = _get_access_token(user_id)
 
     events_res = (
         supabase.table("application_events")
