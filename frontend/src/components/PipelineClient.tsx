@@ -182,11 +182,15 @@ export default function PipelineClient({
       if (!user) return;
 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
       const res = await fetch(`${apiUrl}/emails/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, max_results: 40 }),
+        body: JSON.stringify({ user_id: user.id, max_results: 25 }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
 
       const data = await res.json();
       if (!res.ok) {
@@ -199,8 +203,14 @@ export default function PipelineClient({
         `Gmail Sync Complete: Scanned ${data.scanned} new emails, matched ${data.matched} updates, staged ${data.staged_for_review} for review.`
       );
       router.refresh();
-    } catch {
-      alert('Could not reach FastAPI backend on port 8000. Make sure uvicorn is running.');
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        alert('Gmail sync timed out after 30s. Check your uvicorn terminal for progress.');
+      } else {
+        alert(
+          `Sync request failed (${err instanceof Error ? err.message : 'Network/CORS error'}). Check your uvicorn terminal.`
+        );
+      }
     } finally {
       setSyncing(false);
     }
