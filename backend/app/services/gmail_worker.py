@@ -26,7 +26,7 @@ ATS_LIFECYCLE_QUERY = (
     'OR "interview invitation" OR "unfortunately" OR "regret to inform" '
     'OR from:(workday OR successfactors OR oraclecloud OR greenhouse OR lever OR smartrecruiters OR icims)'
     ') '
-    '-from:(indeed.com OR jobalerts-noreply@linkedin.com OR jobleads.com OR jobtome.com) '
+    '-from:(indeed.com OR jobalerts-noreply@linkedin.com OR jobleads.com OR jobtome.com OR redditmail.com OR medium.com OR github.com) '
     '-subject:("job alert" OR "job match" OR "new jobs" OR "is hiring" OR "may be a fit" OR "vacancies")'
 )
 
@@ -303,7 +303,11 @@ def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
                 staged += 1
 
     print("[Sync 4/4] Syncing job alert leads...", flush=True)
-    leads = _sync_and_fetch_leads(service, user_id)
+    try:
+        leads = _sync_and_fetch_leads(service, user_id)
+    except Exception as exc:
+        print(f"[Sync 4/4 Error] {exc}", flush=True)
+        leads = []
 
     return {
         "scanned": len(unseen_emails),
