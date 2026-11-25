@@ -66,6 +66,7 @@ export default function PipelineClient({
   const [syncing, setSyncing] = useState(false);
   const [leads, setLeads] = useState<JobLead[]>(initialLeads);
   const [showClosed, setShowClosed] = useState(false);
+  const [reviewEvents, setReviewEvents] = useState<UnverifiedEvent[]>(unverifiedEvents);
 
   // Add Job modal state
   const [companyName, setCompanyName] = useState('');
@@ -310,36 +311,95 @@ export default function PipelineClient({
   }
 
   async function handleVerifyEvent(ev: UnverifiedEvent, approve: boolean) {
-    if (approve && ev.application_id && ev.detected_status) {
+    if (approve) {
+      const emailUrl = ev.gmail_message_id
+        ? `https://mail.google.com/mail/u/0/#all/${ev.gmail_message_id}`
+        : null;
+      const targetStatus = (ev.detected_status || 'CLOSED') as ApplicationStatus;
+      let resolvedAppId = ev.application_id;
+
+      if (resolvedAppId) {
+        const { data: updated } = await supabase
+          .from('applications')
+          .update({
+            status: targetStatus,
+            ...(emailUrl ? { portal_url: emailUrl } : {}),
+          })
+          .eq('id', resolvedAppId)
+          .select()
+          .single();
+
+        if (updated) {
+          setApps((prev) =>
+            prev.map((a) => (a.id === updated.id ? (updated as Application) : a))
+          );
+        }
+      } else {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (user) {
+          const companyName =
+            ev.raw_subject?.split(/application|feedback|-|:/i)[0]?.trim() || 'Company';
+          const { data: inserted } = await supabase
+            .from('applications')
+            .insert({
+              user_id: user.id,
+              company_name: companyName,
+              role_title: ev.raw_subject || 'Application Update',
+              status: targetStatus,
+              source: 'Gmail Sync',
+              portal_url: emailUrl,
+            })
+            .select()
+            .single();
+
+          if (inserted) {
+            resolvedAppId = inserted.id;
+            setApps((prev) => [inserted as Application, ...prev]);
+          }
+        }
+      }
+
       await supabase
-        .from('applications')
-        .update({ status: ev.detected_status })
-        .eq('id', ev.application_id);
+        .from('application_events')
+        .update({
+          is_verified: true,
+          ...(resolvedAppId ? { application_id: resolvedAppId } : {}),
+        })
+        .eq('id', ev.id);
+    } else {
+      await supabase
+        .from('application_events')
+        .update({ is_verified: true })
+        .eq('id', ev.id);
     }
-    await supabase
-      .from('application_events')
-      .update({ is_verified: true })
-      .eq('id', ev.id);
+
+    setReviewEvents((prev) => {
+      const next = prev.filter((item) => item.id !== ev.id);
+      if (next.length === 0) setReviewOpen(false);
+      return next;
+    });
     router.refresh();
   }
 
   return (
     <div className="p-6 lg:p-8 min-h-screen flex flex-col">
       {/* Subtle Staging Banner (Only appears when low-confidence ATS emails await review) */}
-      {unverifiedEvents.length > 0 && (
+      {reviewEvents.length > 0 && (
         <div className="mb-5 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between text-xs">
           <div className="flex items-center gap-2 text-amber-300">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>
-              {unverifiedEvents.length} unverified ATS email
-              {unverifiedEvents.length > 1 ? 's' : ''} need your review
+              {reviewEvents.length} unverified ATS email
+              {reviewEvents.length > 1 ? 's' : ''} need your review
             </span>
           </div>
           <button
             onClick={() => setReviewOpen(true)}
             className="font-medium text-cyan-400 hover:text-cyan-300"
           >
-            Review ({unverifiedEvents.length}) →
+            Review ({reviewEvents.length}) →
           </button>
         </div>
       )}
@@ -825,7 +885,7 @@ export default function PipelineClient({
             </div>
 
             <div className="space-y-3 max-h-96 overflow-y-auto">
-              {unverifiedEvents.map((ev) => (
+              {reviewEvents.map((ev) => (
                 <div
                   key={ev.id}
                   className="p-3.5 rounded-xl bg-[#0B0F17] border border-slate-800 space-y-2"

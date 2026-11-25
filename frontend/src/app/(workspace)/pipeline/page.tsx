@@ -6,6 +6,7 @@ import { Application, VaultDocument } from '@/types/database';
 export interface UnverifiedEvent {
   id: string;
   application_id: string | null;
+  gmail_message_id: string | null;
   detected_status: string | null;
   raw_subject: string | null;
   raw_snippet: string | null;
@@ -35,7 +36,7 @@ export default async function PipelinePage() {
     supabase.from('application_documents').select('application_id, document_id'),
     supabase
       .from('application_events')
-      .select('id, application_id, detected_status, raw_subject, raw_snippet, confidence_score, occurred_at')
+      .select('id, application_id, gmail_message_id, detected_status, raw_subject, raw_snippet, confidence_score, occurred_at')
       .eq('is_verified', false)
       .order('occurred_at', { ascending: false }),
     supabase

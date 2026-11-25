@@ -265,7 +265,12 @@ def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
                     app_id = new_app.data[0]["id"]
                     existing_apps.append(new_app.data[0])
 
-            is_verified = bool(app_id and parsed.confidence_score >= 0.85)
+            is_verified = bool(
+                app_id and (
+                    parsed.confidence_score >= 0.85
+                    or (parsed.detected_status == "CLOSED" and parsed.confidence_score >= 0.75)
+                )
+            )
 
             supabase.table("application_events").insert(
                 {
