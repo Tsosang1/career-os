@@ -300,7 +300,16 @@ def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
         .execute()
     )
     existing_events = events_res.data or []
-    seen_ids = {e["gmail_message_id"] for e in existing_events if e.get("gmail_message_id")}
+    scan_res = (
+        supabase.table("scanned_emails")
+        .select("gmail_message_id")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    seen_ids = (
+        {e["gmail_message_id"] for e in existing_events if e.get("gmail_message_id")}
+        | {r["gmail_message_id"] for r in (scan_res.data or []) if r.get("gmail_message_id")}
+    )
 
     apps_res = (
         supabase.table("applications")
@@ -419,6 +428,16 @@ def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
                 matched += 1
             else:
                 staged += 1
+
+        scanned_rows = [
+            {"user_id": user_id, "gmail_message_id": item["msg_id"]}
+            for item in unseen_emails
+        ]
+        supabase.table("scanned_emails").upsert(
+            scanned_rows,
+            on_conflict="user_id,gmail_message_id",
+            ignore_duplicates=True,
+        ).execute()
 
     print("[Sync 4/4] Syncing job alert leads...", flush=True)
     try:
