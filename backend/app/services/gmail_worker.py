@@ -16,6 +16,15 @@ from app.services.entity_resolver import resolve_application_id
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
 
+STAGE_RANK = {
+    "RADAR": 0,
+    "APPLIED": 1,
+    "ASSESSMENT": 2,
+    "INTERVIEW": 3,
+    "OFFER": 4,
+    "CLOSED": 5,
+}
+
 ATS_LIFECYCLE_QUERY = (
     'newer_than:90d ('
     '"thank you for applying" OR "application received" OR "received your application" '
@@ -234,6 +243,8 @@ def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
                 parsed.company_name, item["thread_id"], existing_apps, existing_events
             )
 
+            email_link = f"https://mail.google.com/mail/u/0/#all/{item['msg_id']}"
+
             if not app_id and parsed.company_name and parsed.confidence_score >= 0.85:
                 new_app = (
                     supabase.table("applications")
@@ -244,6 +255,7 @@ def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
                             "role_title": parsed.role_title or "Graduate / Software Role",
                             "status": parsed.detected_status,
                             "source": "Gmail Sync",
+                            "portal_url": email_link,
                             "applied_at": datetime.now(timezone.utc).isoformat(),
                         }
                     )
@@ -270,9 +282,17 @@ def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
             ).execute()
 
             if is_verified and app_id:
-                supabase.table("applications").update(
-                    {"status": parsed.detected_status}
-                ).eq("id", app_id).execute()
+                current_status = next(
+                    (a["status"] for a in existing_apps if a["id"] == app_id),
+                    "RADAR",
+                )
+                if STAGE_RANK.get(parsed.detected_status, 0) >= STAGE_RANK.get(current_status, 0):
+                    supabase.table("applications").update(
+                        {"status": parsed.detected_status, "portal_url": email_link}
+                    ).eq("id", app_id).execute()
+                    for a in existing_apps:
+                        if a["id"] == app_id:
+                            a["status"] = parsed.detected_status
                 matched += 1
             else:
                 staged += 1

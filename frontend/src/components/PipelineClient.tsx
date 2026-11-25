@@ -461,10 +461,24 @@ export default function PipelineClient({
                         </div>
                       )}
 
-                      <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-800/60">
-                        {timeAgo(app.applied_at || app.created_at)} •{' '}
-                        {app.source || 'Manual'}
-                      </p>
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-800/70 text-[11px] text-slate-500">
+                        <span>
+                          {timeAgo(app.applied_at || app.created_at)} •{' '}
+                          {app.source || 'Manual'}
+                        </span>
+                        {app.portal_url && (
+                          <a
+                            href={app.portal_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            title="Open original email or portal"
+                            className="text-cyan-400 hover:text-cyan-300 font-medium px-1.5 py-0.5 rounded hover:bg-cyan-500/10 transition"
+                          >
+                            Email / Link ↗
+                          </a>
+                        )}
+                      </div>
                     </div>
                   ))
                 )}
@@ -517,9 +531,23 @@ export default function PipelineClient({
                   <p className="text-xs text-slate-400 truncate mt-1">
                     {app.role_title}
                   </p>
-                  <p className="text-[10px] text-slate-500 mt-1.5">
-                    {timeAgo(app.updated_at || app.created_at)} • {app.source || 'Manual'}
-                  </p>
+                  <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-800/70 text-[10px] text-slate-500">
+                    <span>
+                      {timeAgo(app.updated_at || app.created_at)} • {app.source || 'Manual'}
+                    </span>
+                    {app.portal_url && (
+                      <a
+                        href={app.portal_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        title="Open original email or portal"
+                        className="text-cyan-400 hover:text-cyan-300 font-medium px-1.5 py-0.5 rounded hover:bg-cyan-500/10 transition"
+                      >
+                        Email / Link ↗
+                      </a>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
