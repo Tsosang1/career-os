@@ -24,7 +24,12 @@ NOISE_PATTERNS = re.compile(
 )
 
 REJECTION_PATTERNS = re.compile(
-    r"(regret to inform|unable to offer you employment|unsuccessful|not been selected|not moving forward|position has been filled)",
+    r"(regret to inform|unable to offer you employment|unsuccessful|not been selected|not moving forward|position has been filled|isn't progressing|not progressing|not to take your application further)",
+    re.IGNORECASE,
+)
+
+CONFIRMATION_PATTERNS = re.compile(
+    r"(your application for .+ has been sent|your application has been sent|thank you for applying|application received|received your application)",
     re.IGNORECASE,
 )
 
@@ -91,6 +96,10 @@ def classify_email_batch(emails: list[dict]) -> dict[int, ParsedAtsEmail]:
         elif REJECTION_PATTERNS.search(text):
             company = _extract_company_from_sender(item["sender"])
             role = _extract_role_from_subject(item["subject"])
+            # For Workday subjects like "We're sorry your Accenture application isn't progressing further", pull role from snippet if needed
+            role_in_snippet = re.search(r"role of\s+(.+?)\s+at\s+", item["snippet"], re.IGNORECASE)
+            if role_in_snippet:
+                role = role_in_snippet.group(1).strip()
             results[item["index"]] = ParsedAtsEmail(
                 is_job_related=True,
                 company_name=company,
@@ -98,6 +107,18 @@ def classify_email_batch(emails: list[dict]) -> dict[int, ParsedAtsEmail]:
                 detected_status="CLOSED",
                 confidence_score=0.96,
                 summary=f"Application update ({role}) from {company}.",
+            )
+        elif CONFIRMATION_PATTERNS.search(text):
+            company = _extract_company_from_sender(item["sender"])
+            pnet_role = re.search(r"application for\s+(.+?)\s+has been sent", text, re.IGNORECASE)
+            role = pnet_role.group(1).strip() if pnet_role else _extract_role_from_subject(item["subject"])
+            results[item["index"]] = ParsedAtsEmail(
+                is_job_related=True,
+                company_name=company,
+                role_title=role,
+                detected_status="APPLIED",
+                confidence_score=0.95,
+                summary=f"Application confirmation ({role}) via {company}.",
             )
         else:
             to_classify.append(item)

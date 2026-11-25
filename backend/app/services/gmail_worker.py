@@ -19,10 +19,12 @@ GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
 ATS_LIFECYCLE_QUERY = (
     'newer_than:90d ('
     '"thank you for applying" OR "application received" OR "received your application" '
+    'OR "has been sent" OR "application has been sent" '
     'OR "your application to" OR "your application for" OR "application status" '
     'OR "thank you for your interest" OR "sova" OR "online assessment" '
     'OR "interview invitation" OR "unfortunately" OR "regret to inform" '
-    'OR from:(workday OR successfactors OR oraclecloud OR greenhouse OR lever OR smartrecruiters OR icims)'
+    'OR "isn\'t progressing" OR "not progressing" OR "not to take your application" '
+    'OR from:(workday OR successfactors OR oraclecloud OR greenhouse OR lever OR smartrecruiters OR icims OR myworkdayjobs)'
     ') '
     '-from:(indeed.com OR jobalerts-noreply@linkedin.com OR jobleads.com OR jobtome.com OR redditmail.com OR medium.com OR github.com) '
     '-subject:("job alert" OR "job match" OR "new jobs" OR "is hiring" OR "may be a fit" OR "vacancies")'
