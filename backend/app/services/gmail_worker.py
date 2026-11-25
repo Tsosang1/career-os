@@ -1,14 +1,12 @@
-import os
-import re
 import asyncio
 import base64
-import httpx
-from email.utils import parsedate_to_datetime
+import os
+import re
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+import httpx
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
 from supabase import create_client
 
 from app.config import settings
@@ -16,8 +14,8 @@ from app.services.gemini_parser import classify_email_batch
 from app.services.entity_resolver import resolve_application_id
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
 
-# 1. Pure ATS lifecycle query — excludes all job-alert spam so real receipts & rejections always surface
 ATS_LIFECYCLE_QUERY = (
     'newer_than:90d ('
     '"thank you for applying" OR "application received" OR "received your application" '
@@ -30,7 +28,6 @@ ATS_LIFECYCLE_QUERY = (
     '-subject:("job alert" OR "job match" OR "new jobs" OR "is hiring" OR "may be a fit" OR "vacancies")'
 )
 
-# 2. Curated job-alert leads query (for the drag-to-Radar strip underneath the board)
 JOB_LEADS_QUERY = (
     'newer_than:14d ('
     'from:jobalerts-noreply@linkedin.com OR subject:("job match for you" OR "New jobs posted from careers.")'
@@ -39,50 +36,54 @@ JOB_LEADS_QUERY = (
 
 supabase = create_client(settings.supabase_url, settings.supabase_service_role_key)
 
-def get_gmail_service():
-    creds = None
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
+def _get_access_token() -> str:
+    if not os.path.exists("token.json"):
+        raise RuntimeError("token.json missing in backend/.")
+    creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    if not creds.valid:
+        if creds.expired and creds.refresh_token:
             creds.refresh(Request())
-            with open("token.json", "w") as token:
-                token.write(creds.to_json())
+            with open("token.json", "w") as f:
+                f.write(creds.to_json())
         else:
-            raise RuntimeError(
-                "Gmail token.json is missing or expired. Re-authorize via CLI before syncing."
-            )
-    return build("gmail", "v1", credentials=creds), creds
+            raise RuntimeError("Gmail token expired; re-authorize.")
+    return creds.token
 
-async def _async_fetch_messages(access_token: str, msg_ids: list[str], fmt: str = "metadata") -> list[dict]:
-    if not msg_ids:
-        return []
-    headers = {"Authorization": f"Bearer {access_token}"}
-    params = (
-        [("format", "metadata"), ("metadataHeaders", "From"), ("metadataHeaders", "Subject")]
-        if fmt == "metadata"
-        else [("format", fmt)]
-    )
-
+async def _gmail_list_and_fetch(
+    token: str,
+    query: str,
+    max_results: int,
+    skip_ids: set[str],
+    fmt: str = "metadata",
+) -> list[dict]:
+    headers = {"Authorization": f"Bearer {token}"}
     async with httpx.AsyncClient(timeout=10.0) as client:
+        list_resp = await client.get(
+            f"{GMAIL_API}/messages",
+            headers=headers,
+            params={"q": query, "maxResults": max_results},
+        )
+        list_resp.raise_for_status()
+        msg_ids = [
+            m["id"] for m in list_resp.json().get("messages", []) if m["id"] not in skip_ids
+        ]
+        if not msg_ids:
+            return []
+
+        params = (
+            [("format", "metadata"), ("metadataHeaders", "From"), ("metadataHeaders", "Subject")]
+            if fmt == "metadata"
+            else [("format", fmt)]
+        )
         tasks = [
-            client.get(
-                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{mid}",
-                headers=headers,
-                params=params,
-            )
+            client.get(f"{GMAIL_API}/messages/{mid}", headers=headers, params=params)
             for mid in msg_ids
         ]
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 
-    results = []
-    for resp in responses:
-        if isinstance(resp, httpx.Response) and resp.status_code == 200:
-            results.append(resp.json())
-    return results
-
-def _batch_fetch_messages(creds, msg_ids: list[str], fmt: str = "metadata", metadata_headers=None) -> list[dict]:
-    return asyncio.run(_async_fetch_messages(creds.token, msg_ids, fmt=fmt))
+    return [
+        r.json() for r in responses if isinstance(r, httpx.Response) and r.status_code == 200
+    ]
 
 def _extract_job_url(payload: dict, msg_id: str) -> str:
     """Finds the direct job listing URL inside the email body, or falls back to the Gmail message."""
@@ -96,86 +97,59 @@ def _extract_job_url(payload: dict, msg_id: str) -> str:
             except Exception:
                 pass
 
-    # Look for LinkedIn job view links or external career links
     linkedin_match = re.search(r"https://www\.linkedin\.com/comm/jobs/view/\d+[^\s\"'<>]*", raw_html)
     if linkedin_match:
         return linkedin_match.group(0).replace("&amp;", "&")
 
     return f"https://mail.google.com/mail/u/0/#all/{msg_id}"
 
-def _sync_and_fetch_leads(service, user_id: str, max_leads: int = 15) -> list[dict]:
-    msg_list = (
-        service.users()
-        .messages()
-        .list(userId="me", q=JOB_LEADS_QUERY, maxResults=max_leads)
-        .execute()
-    ).get("messages", [])
-
-    # Check known lead IDs in job_leads to skip redundant network calls
-    existing_leads_res = (
-        supabase.table("job_leads")
-        .select("gmail_message_id")
-        .eq("user_id", user_id)
-        .execute()
+def _sync_and_fetch_leads(token: str, user_id: str, max_leads: int = 15) -> list[dict]:
+    msgs = asyncio.run(
+        _gmail_list_and_fetch(token, JOB_LEADS_QUERY, max_leads, set(), fmt="full")
     )
-    known_lead_ids = {r["gmail_message_id"] for r in (existing_leads_res.data or []) if r.get("gmail_message_id")}
-    new_items = [item for item in msg_list if item["id"] not in known_lead_ids]
 
-    def _fetch_lead_detail(item):
-        try:
-            return service.users().messages().get(userId="me", id=item["id"], format="full").execute()
-        except Exception as exc:
-            print(f"[Lead Fetch Error] id {item['id']}: {exc}", flush=True)
-            return None
+    for msg in msgs:
+        payload = msg.get("payload", {})
+        headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
+        subject = headers.get("Subject", "").strip()
+        sender = headers.get("From", "")
+        raw_date = headers.get("Date", "")
 
-    if new_items:
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            fetched_msgs = list(executor.map(_fetch_lead_detail, new_items))
+        received_iso = None
+        if raw_date:
+            try:
+                received_iso = parsedate_to_datetime(raw_date).isoformat()
+            except Exception:
+                received_iso = None
 
-        for msg in fetched_msgs:
-            if not msg:
-                continue
-            payload = msg.get("payload", {})
-            headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
-            subject = headers.get("Subject", "").strip()
-            sender = headers.get("From", "")
-            raw_date = headers.get("Date", "")
+        at_match = re.match(
+            r"^(?:You may be a fit for\s+)?(.+?)\s+(?:at|@)\s+(.+?)(?:\s+in\s+South Africa.*)?$",
+            subject,
+            re.IGNORECASE,
+        )
+        if at_match:
+            role_title = at_match.group(1).strip(" '\"")
+            company_name = at_match.group(2).split(" - ")[0].strip(" '\"")
+        elif "Vodafone job match" in subject:
+            company_name = "Vodacom / Vodafone"
+            role_title = "Graduate / Early Careers Match"
+        else:
+            continue
 
-            received_iso = None
-            if raw_date:
-                try:
-                    received_iso = parsedate_to_datetime(raw_date).isoformat()
-                except Exception:
-                    received_iso = None
-
-            at_match = re.match(
-                r"^(?:You may be a fit for\s+)?(.+?)\s+(?:at|@)\s+(.+?)(?:\s+in\s+South Africa.*)?$",
-                subject,
-                re.IGNORECASE,
-            )
-            if at_match:
-                role_title = at_match.group(1).strip(" '\"")
-                company_name = at_match.group(2).split(" - ")[0].strip(" '\"")
-            elif "Vodafone job match" in subject:
-                company_name = "Vodacom / Vodafone"
-                role_title = "Graduate / Early Careers Match"
-            else:
-                continue
-
-            supabase.table("job_leads").upsert(
-                {
-                    "user_id": user_id,
-                    "gmail_message_id": msg["id"],
-                    "company_name": company_name[:80],
-                    "role_title": role_title[:100],
-                    "location_mode": "South Africa",
-                    "source": "LinkedIn Alert" if "linkedin" in sender.lower() else "Email Alert",
-                    "portal_url": _extract_job_url(payload, msg["id"]),
-                    "received_at": received_iso or datetime.now(timezone.utc).isoformat(),
-                },
-                on_conflict="user_id,gmail_message_id",
-                ignore_duplicates=True,
-            ).execute()
+        supabase.table("job_leads").upsert(
+            {
+                "user_id": user_id,
+                "gmail_message_id": msg["id"],
+                "company_name": company_name[:80],
+                "role_title": role_title[:100],
+                "location_mode": "South Africa",
+                "source": "LinkedIn Alert" if "linkedin" in sender.lower() else "Email Alert",
+                "portal_url": _extract_job_url(payload, msg["id"]),
+                "received_at": received_iso or datetime.now(timezone.utc).isoformat(),
+            },
+            on_conflict="user_id,gmail_message_id",
+            ignore_duplicates=True,
+        ).execute()
 
     res = (
         supabase.table("job_leads")
@@ -188,7 +162,7 @@ def _sync_and_fetch_leads(service, user_id: str, max_leads: int = 15) -> list[di
     return res.data or []
 
 def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
-    service, creds = get_gmail_service()
+    token = _get_access_token()
 
     events_res = (
         supabase.table("application_events")
@@ -207,32 +181,25 @@ def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
     )
     existing_apps = apps_res.data or []
 
-    print("[Sync 1/4] Querying Gmail ATS messages...", flush=True)
-    msg_list = (
-        service.users()
-        .messages()
-        .list(userId="me", q=ATS_LIFECYCLE_QUERY, maxResults=max_results)
-        .execute()
-    ).get("messages", [])
-
-    candidate_items = [item for item in msg_list if item["id"] not in seen_ids]
-    print(f"[Sync 2/4] Batch-fetching {len(candidate_items)} unseen messages...", flush=True)
+    print("[Sync 1/4] Querying & batch-fetching Gmail ATS messages via httpx...", flush=True)
+    fetched_msgs = asyncio.run(
+        _gmail_list_and_fetch(token, ATS_LIFECYCLE_QUERY, max_results, seen_ids, fmt="metadata")
+    )
+    print(f"[Sync 2/4] Fetched {len(fetched_msgs)} unseen messages.", flush=True)
 
     unseen_emails = []
-    if candidate_items:
-        fetched_msgs = _batch_fetch_messages(creds, [item["id"] for item in candidate_items], fmt="metadata")
-        for msg in fetched_msgs:
-            headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
-            unseen_emails.append(
-                {
-                    "index": len(unseen_emails),
-                    "msg_id": msg["id"],
-                    "thread_id": msg.get("threadId", ""),
-                    "sender": headers.get("From", ""),
-                    "subject": headers.get("Subject", ""),
-                    "snippet": msg.get("snippet", ""),
-                }
-            )
+    for msg in fetched_msgs:
+        headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
+        unseen_emails.append(
+            {
+                "index": len(unseen_emails),
+                "msg_id": msg["id"],
+                "thread_id": msg.get("threadId", ""),
+                "sender": headers.get("From", ""),
+                "subject": headers.get("Subject", ""),
+                "snippet": msg.get("snippet", ""),
+            }
+        )
 
     matched = 0
     staged = 0
@@ -304,7 +271,7 @@ def run_gmail_sync(user_id: str, max_results: int = 40) -> dict:
 
     print("[Sync 4/4] Syncing job alert leads...", flush=True)
     try:
-        leads = _sync_and_fetch_leads(service, user_id)
+        leads = _sync_and_fetch_leads(token, user_id)
     except Exception as exc:
         print(f"[Sync 4/4 Error] {exc}", flush=True)
         leads = []

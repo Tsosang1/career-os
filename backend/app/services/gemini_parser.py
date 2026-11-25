@@ -7,25 +7,18 @@ from app.config import settings
 from app.schemas import ParsedAtsEmail
 
 groq_client = (
-    OpenAI(api_key=settings.groq_api_key, base_url="https://api.groq.com/openai/v1")
+    OpenAI(
+        api_key=settings.groq_api_key,
+        base_url="https://api.groq.com/openai/v1",
+        timeout=12.0,
+        max_retries=0,
+    )
     if settings.groq_api_key
     else None
 )
 gemini_client = genai.Client(api_key=settings.gemini_api_key)
 
-def _get_active_groq_models() -> list[str]:
-    if not groq_client:
-        return []
-    try:
-        available = [m.id for m in groq_client.models.list().data]
-        preferred = ["openai/gpt-oss-20b", "qwen/qwen3-32b", "meta-llama/llama-4-scout-17b-16e-instruct"]
-        ordered = [m for m in preferred if m in available]
-        others = [m for m in available if "whisper" not in m and "guard" not in m and m not in ordered]
-        return (ordered + others)[:2]
-    except Exception:
-        return ["openai/gpt-oss-20b", "qwen/qwen3-32b"]
-
-GROQ_MODELS = _get_active_groq_models()
+GROQ_MODELS = ["openai/gpt-oss-20b", "qwen/qwen3-32b"]
 
 NOISE_PATTERNS = re.compile(
     r"(new jobs matching|job alert|jobs you might be interested in|recommended jobs|top jobs for you|digest|reddit)",
@@ -76,7 +69,7 @@ def classify_email_batch(emails: list[dict]) -> dict[int, ParsedAtsEmail]:
     if not to_classify:
         return results
 
-    print(f"[Parser] Single-batch classifying {len(to_classify)} emails via {GROQ_MODELS}...", flush=True)
+    print(f"[Parser] Batch-classifying {len(to_classify)} emails...", flush=True)
     user_payload = json.dumps(to_classify, ensure_ascii=False)
 
     if groq_client:
@@ -89,7 +82,6 @@ def classify_email_batch(emails: list[dict]) -> dict[int, ParsedAtsEmail]:
                         {"role": "user", "content": user_payload},
                     ],
                     response_format={"type": "json_object"},
-                    temperature=0.1,
                 )
                 raw = completion.choices[0].message.content or "{}"
                 parsed_json = json.loads(raw)
@@ -103,12 +95,11 @@ def classify_email_batch(emails: list[dict]) -> dict[int, ParsedAtsEmail]:
                         confidence_score=float(row.get("confidence_score", 0.0)),
                         summary=row.get("summary", ""),
                     )
-                print(f"[Parser] Groq ({model_name}) succeeded in 1 batch!", flush=True)
+                print(f"[Parser] Groq ({model_name}) succeeded!", flush=True)
                 return results
             except Exception as exc:
                 print(f"[Parser] Groq {model_name} failed: {exc}", flush=True)
 
-    # Single-batch Gemini fallback
     try:
         response = gemini_client.models.generate_content(
             model="gemini-3.8-flash-lite",
@@ -131,7 +122,7 @@ def classify_email_batch(emails: list[dict]) -> dict[int, ParsedAtsEmail]:
                 summary=row.get("summary", ""),
             )
     except Exception as exc:
-        print(f"[Parser] Gemini batch fallback failed: {exc}", flush=True)
+        print(f"[Parser] Gemini fallback failed: {exc}", flush=True)
 
     return results
 
